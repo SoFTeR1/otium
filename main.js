@@ -22,7 +22,9 @@ const DEFAULT_DATA = {
   sessions: [],
   settings: {
     user: 'Player', sounds: true, fullscreen: true, autostart: false,
-    bgMode: 'game', wallpaper: '', liveTrailers: true, steamApiKey: '', steamId: ''
+    bgMode: 'game', wallpaper: '', liveTrailers: true, steamApiKey: '', steamId: '',
+    // the shared "PS5 Launcher" Discord application — an app ID is public, everyone can use the same one
+    discordId: '1567308312947728414'
   }
 };
 

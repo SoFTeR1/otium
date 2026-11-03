@@ -307,30 +307,17 @@ function updateDiscord() {
 ipc.onSteamRunning(() => setTimeout(updateDiscord, 500));
 ipc.onGameExited(() => setTimeout(updateDiscord, 500));
 
-function openDiscordSetup() {
+const DISCORD_APP_ID = '1567308312947728414';
+async function toggleDiscord() {
   const s = data.settings;
-  openModal(`<h2>Discord</h2>
-    <div class="meta" style="margin-bottom:14px;line-height:1.6"><span>Друзья в Discord увидят «Играет в …» с обложкой игры и временем.<br>
-    1. Нажмите «Открыть Discord Developer» и создайте приложение с названием <b>PS5 Launcher</b>.<br>
-    2. Скопируйте <b>Application ID</b> со страницы приложения и вставьте сюда.</span></div>
-    <div class="field"><label>Application ID</label><div class="line"><input class="focusable" id="fDisc" placeholder="18–20 цифр" value="${esc(s.discordId || '')}"/>
-      <button class="btn focusable" id="bDev">Открыть Discord Developer</button></div>
-      <div class="hint" id="discState">${s.discordId ? 'Проверяем соединение…' : 'Discord должен быть запущен на этом ПК'}</div></div>
-    <div class="buttons"><button class="btn focusable" id="bNo">Отмена</button><button class="btn primary focusable" id="bOk">Сохранить</button></div>`);
-  $('#bDev').onclick = () => ipc.openUrl('https://discord.com/developers/applications');
-  $('#bNo').onclick = closeModal;
-  $('#bOk').onclick = async () => {
-    s.discordId = $('#fDisc').value.replace(/\D/g, '');
-    await save();
-    await ipc.discordConfig(s.discordId);
+  s.discordId = s.discordId ? '' : DISCORD_APP_ID;
+  await save();
+  // closing the pipe clears the status in Discord
+  await ipc.discordConfig(s.discordId);
+  if (s.discordId) {
     updateDiscord();
-    closeModal();
-    toast(s.discordId ? 'Discord подключён — статус появится через пару секунд' : 'Discord отключён');
-  };
-  if (s.discordId) setTimeout(async () => {
-    const ok = await ipc.discordStatus();
-    if ($('#discState')) $('#discState').textContent = ok ? '✓ Соединение с Discord установлено' : 'Discord не найден — он запущен?';
-  }, 300);
+    setTimeout(async () => toast(await ipc.discordStatus() ? 'Статус в Discord включён' : 'Статус включится, когда Discord будет запущен'), 2500);
+  } else toast('Статус в Discord выключен');
 }
 
 function profileInit() {
