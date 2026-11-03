@@ -296,6 +296,29 @@ function friends(key, steamId) {
   });
 }
 
+// A Steam friend's library for their profile page (needs their game details to be public)
+function playerGames(key, steamId) {
+  return cached('games' + steamId + key.slice(-6), 10 * 60e3, async () => {
+    const [owned, recent, sum] = await Promise.all([
+      probe(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${key}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1`),
+      probe(`https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/?key=${key}&steamid=${steamId}&count=6`),
+      probe(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${key}&steamids=${steamId}`)
+    ]);
+    if (keyRejected(owned)) return { error: 'badkey' };
+    const p = sum.data?.response?.players?.[0] || {};
+    const map = (g) => ({ id: String(g.appid), name: g.name, playtime: (g.playtime_forever || 0) * 60, recent: (g.playtime_2weeks || 0) * 60 });
+    const games = (owned.data?.response?.games || []).map(map).sort((a, b) => b.playtime - a.playtime);
+    return {
+      name: p.personaname, avatar: p.avatarfull, game: p.gameextrainfo || null, state: p.personastate,
+      since: p.timecreated ? p.timecreated * 1000 : null,
+      hidden: !owned.data?.response?.games,
+      recent: (recent.data?.response?.games || []).map(map),
+      games: games.slice(0, 60),
+      total: games.length
+    };
+  });
+}
+
 // What the account dialog shows: is the key accepted, which profile is it, is it public
 async function checkAccount(key, steamId) {
   if (!key) return { error: 'nokey' };
@@ -357,4 +380,4 @@ function trailer(appid) {
   });
 }
 
-module.exports = { scan, localStats, currentUser, watchRunning, running, news, achievements, friends, checkAccount, sales, trailer };
+module.exports = { scan, localStats, currentUser, watchRunning, running, news, achievements, friends, checkAccount, playerGames, sales, trailer, clearCache: (prefix) => [...cache.keys()].forEach((k) => k.startsWith(prefix) && cache.delete(k)) };

@@ -209,6 +209,7 @@ async function loadTrophies(g, sid, key) {
   if (feedGame !== key || !r) return;
   if (r.error === 'none' || (!r.error && !r.total)) return setSection('trophies', []);
   if (r.error) return setSection('trophies', [steamErrorCard(r.error, 'trophies') || steamErrorCard('error')]);
+  noteTrophy(g.name, sid, r.items, false);
 
   const pct = Math.round((100 * r.done) / r.total);
   const C = 2 * Math.PI * 34;
@@ -325,26 +326,47 @@ function refreshStats() {
   setSection('stats', data.games.length ? cards : []);
 }
 
+let steamFriendsCache = null;
+// Launcher friends (who's online / playing what) first, then Steam friends; cards open the friend's profile
 async function refreshFriends() {
-  if (!apiKey() || !steamUser()) return setSection('friends', []);
-  const r = await ipc.friends({ key: apiKey(), steamId: steamUser() });
-  if (!r) return;
-  if (r.error) {
-    // keep showing the last good list on a network hiccup
-    if (r.error === 'network' && feed.cards.friends?.length) return;
-    return setSection('friends', [steamErrorCard(r.error, 'friends')].filter(Boolean), { title: 'Друзья Steam' });
+  const lf = (typeof acct === 'function' && acct()?.friends) || [];
+  const lfOnline = lf.map((f) => ({ f, p: presenceOf(f.pk) })).filter((x) => x.p.online).sort((a, b) => b.p.game - a.p.game);
+  const lfCards = lfOnline.map(({ f, p }) => {
+    const h = hue(f.pk);
+    return {
+      cls: 'friend',
+      html: `<div class="av letter" style="background:linear-gradient(135deg,hsl(${h} 65% 45%),hsl(${(h + 60) % 360} 65% 30%))">${esc(f.name[0].toUpperCase())}<i class="${p.game ? 'game' : 'on'}"></i></div>
+        <div class="t">${esc(f.name)}</div><div class="d"><span class="st ${p.game ? 'game' : 'on'}">${esc(p.game ? p.text.replace(/^В игре: /, '') : 'В сети')}</span></div>`,
+      ok: () => openProfile({ kind: 'friend', id: f.pk })
+    };
+  });
+
+  let steamCards = [];
+  let steamOnline = 0;
+  let err = null;
+  if (apiKey() && steamUser()) {
+    const r = await ipc.friends({ key: apiKey(), steamId: steamUser() });
+    if (r?.error) {
+      // keep showing the last good list on a network hiccup
+      if (!(r.error === 'network' && steamFriendsCache)) err = steamErrorCard(r.error, 'friends');
+    } else if (r?.list) steamFriendsCache = r.list;
+    const list = steamFriendsCache || [];
+    const online = list.filter((f) => f.state > 0 || f.game).sort((a, b) => !!b.game - !!a.game || (a.state === 1 ? -1 : 1) - (b.state === 1 ? -1 : 1));
+    steamOnline = online.length;
+    const offline = list.length - online.length;
+    const status = (f) => f.game ? `<span class="st game">${esc(f.game)}</span>` : f.state === 1 ? '<span class="st on">В сети</span>' : '<span class="st away">Нет на месте</span>';
+    steamCards = online.map((f) => ({
+      cls: 'friend',
+      html: `<div class="av" style="background-image:${esc(cssUrl(f.avatar))}"><i class="${f.game ? 'game' : f.state === 1 ? 'on' : 'away'}"></i></div><div class="t">${esc(f.name)}</div><div class="d">${status(f)}</div>`,
+      ok: () => openProfile({ kind: 'steam', id: f.id })
+    }));
+    if (offline) steamCards.push({ cls: 'friend more', html: `<div class="av plus">+${offline}</div><div class="t">Не в сети</div><div class="d">открыть список друзей</div>`, ok: () => ipc.openUrl('steam://open/friends') });
   }
-  const list = r.list;
-  const online = list.filter((f) => f.state > 0 || f.game).sort((a, b) => !!b.game - !!a.game || (a.state === 1 ? -1 : 1) - (b.state === 1 ? -1 : 1));
-  const offline = list.length - online.length;
-  const status = (f) => f.game ? `<span class="st game">${esc(f.game)}</span>` : f.state === 1 ? '<span class="st on">В сети</span>' : '<span class="st away">Нет на месте</span>';
-  const cards = online.map((f) => ({
-    cls: 'friend',
-    html: `<div class="av" style="background-image:${esc(cssUrl(f.avatar))}"><i class="${f.game ? 'game' : f.state === 1 ? 'on' : 'away'}"></i></div><div class="t">${esc(f.name)}</div><div class="d">${status(f)}</div>`,
-    ok: () => ipc.openUrl(`steam://friends/message/${f.id}`)
-  }));
-  if (offline) cards.push({ cls: 'friend more', html: `<div class="av plus">+${offline}</div><div class="t">Не в сети</div><div class="d">открыть список друзей</div>`, ok: () => ipc.openUrl('steam://open/friends') });
-  setSection('friends', cards, { title: `Друзья · ${online.length} в сети` });
+  const playing = lfOnline.filter((x) => x.p.game).length + (steamFriendsCache || []).filter((f) => f.game).length;
+  const total = lfOnline.length + steamOnline;
+  setSection('friends', [...lfCards, ...(err ? [err] : []), ...steamCards], {
+    title: total ? `Друзья · ${total} в сети${playing ? ` · ${playing} ${plural(playing, 'играет', 'играют', 'играют')}` : ''}` : 'Друзья'
+  });
 }
 
 async function refreshSales() {

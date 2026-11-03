@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('api', {
   achievements: (q) => ipcRenderer.invoke('steam:achievements', q),
   friends: (q) => ipcRenderer.invoke('steam:friends', q),
   steamCheck: (q) => ipcRenderer.invoke('steam:check', q),
+  playerGames: (q) => ipcRenderer.invoke('steam:playerGames', q),
+  achievementsFresh: (q) => ipcRenderer.invoke('steam:achievementsFresh', q),
+  discordConfig: (id) => ipcRenderer.invoke('discord:config', id),
+  discordActivity: (a) => ipcRenderer.invoke('discord:activity', a),
+  discordStatus: () => ipcRenderer.invoke('discord:status'),
+  power: (action) => ipcRenderer.invoke('power:do', action),
 
   sysStats: () => ipcRenderer.invoke('sys:stats'),
   media: (cmd) => ipcRenderer.invoke('media:cmd', cmd),

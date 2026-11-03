@@ -108,6 +108,13 @@ main { position: absolute; inset: 0; }
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 .tile.before { opacity: 0; pointer-events: none; }
+/* custom-order mode: the tile being moved floats with arrows on both sides */
+.tile.moving { transform: translateY(-8px); box-shadow: 0 0 0 3px #4fa3ff, 0 18px 40px rgba(0, 0, 0, 0.6) !important; }
+.tile.moving::before, .tile.moving::after {
+  position: absolute; top: 50%; transform: translateY(-50%); font-size: 26px; color: #4fa3ff; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+.tile.moving::before { content: '‹'; left: -20px; }
+.tile.moving::after { content: '›'; right: -20px; }
 .tile.sel {
   width: var(--tile-big); height: var(--tile-big); margin-top: 0;
   margin-left: clamp(2px, 0.3vw, 6px); margin-right: clamp(2px, 0.3vw, 6px);
@@ -422,6 +429,48 @@ main { transition: transform 0.5s var(--ease); }
 .sprof .t { font-size: 20px; font-weight: 600; }
 .sprof .d { color: var(--dim); font-size: 14px; margin-top: 2px; }
 .steam-item .sav { width: 40px; height: 40px; font-size: 16px; }
+
+/* ---------- Profile ---------- */
+.avatar { position: relative; cursor: pointer; color: #fff; padding: 0; }
+.avatar.focus::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 18px rgba(255, 255, 255, 0.35); }
+.pf-body { flex: 1; overflow-y: auto; padding: 0 5vw 5vh; }
+.pf-body::-webkit-scrollbar { width: 0; }
+.pf-head { display: flex; align-items: center; gap: 26px; padding: 10px 0 30px; }
+.pf-av {
+  width: 112px; height: 112px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center;
+  font-size: 46px; font-weight: 700; background: #2a3042 center / cover no-repeat;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15), 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+.pf-av.plus { font-size: 34px; font-weight: 300; background: rgba(255, 255, 255, 0.1); }
+.pf-name { font-size: clamp(28px, 2.4vw, 44px); font-weight: 600; margin-bottom: 6px; }
+.pf-head .d { color: var(--dim); font-size: 15px; margin-top: 3px; }
+.pf-head .d.game, .pf-friend .d.game { color: #5be38a; }
+.pf-stats { margin-left: auto; display: flex; gap: 14px; }
+.pf-stat { min-width: 110px; padding: 14px 18px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; }
+.pf-stat b { font-size: 26px; font-weight: 600; }
+.pf-stat span { color: var(--dim); font-size: 13px; }
+.pf-sec { margin-bottom: 28px; }
+.pf-row { display: flex; gap: 14px; overflow-x: auto; padding: 8px 6px 12px; margin: -8px -6px; }
+.pf-row::-webkit-scrollbar { height: 0; }
+.pf-row.wrap { flex-wrap: wrap; overflow: visible; }
+.pfi { cursor: pointer; border-radius: 12px; background: rgba(255, 255, 255, 0.06); transition: transform 0.2s var(--ease), box-shadow 0.2s, background 0.15s; flex: 0 0 auto; }
+.pfi:hover { background: rgba(255, 255, 255, 0.1); }
+.pfi.focus { box-shadow: 0 0 0 2px #fff, 0 12px 30px rgba(0, 0, 0, 0.5); transform: scale(1.04); }
+.pf-game { width: 150px; padding: 10px; }
+.pf-game .gc { width: 130px; height: 130px; border-radius: 8px; background: center 20% / cover no-repeat; display: grid; place-items: center; font-weight: 700; font-size: 30px; margin-bottom: 8px; }
+.pf-game .t, .pf-friend .t { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-game .d, .pf-friend .d { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-friend { position: relative; width: 150px; padding: 16px 10px 12px; text-align: center; }
+.pf-friend .pf-av { width: 72px; height: 72px; font-size: 28px; margin: 0 auto 10px; }
+.pf-friend .pres { left: 92px; top: 74px; }
+.pf-trophy { display: inline-flex; align-items: center; gap: 18px; padding: 16px 22px 16px 16px; min-width: 360px; }
+.pf-trophy .ti { width: 72px; height: 72px; display: grid; place-items: center; font-size: 34px; }
+.pf-trophy .t { font-size: 18px; font-weight: 600; margin: 2px 0; }
+.pf-trophy .d { color: var(--dim); font-size: 13px; }
+.pf-btn { padding: 13px 22px; font-weight: 600; }
+.pf-empty { color: var(--dim); padding: 10px 2px; font-size: 14px; }
+.fcard.friend .av.letter { display: grid; place-items: center; font-size: 26px; font-weight: 700; }
+.menu-item .mi { width: 20px; height: 20px; fill: currentColor; flex: 0 0 auto; }
 
 /* video background */
 .bg-video {

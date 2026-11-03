@@ -173,6 +173,7 @@ function renderCC() {
   const unread = typeof socialUnread === 'function' ? socialUnread() : 0;
   items.push({ cls: 'chat', html: `${CC_ICONS.chat}<div class="d">Друзья${unread ? ` · <b class="badge">${unread}</b>` : ''}</div>`, ok: () => { closeCC(); openSocial(); } });
   items.push({ cls: 'set', html: `${CC_ICONS.settings}<div class="d">Настройки</div>`, ok: () => { closeCC(); openSettings(); } });
+  items.push({ cls: 'set', html: `${CC_ICONS.power}<div class="d">Питание</div>`, ok: () => { closeCC(); openPower(); } });
   cc.items = items;
   cc.idx = Math.min(cc.idx, items.length - 1);
   $('#cc').innerHTML = `<div class="cc-bar">${items.map((it, i) => `<div class="cci ${it.cls}" data-i="${i}">${it.html}</div>`).join('')}</div>
@@ -193,6 +194,7 @@ function ccHandle(act) {
 }
 
 const CC_ICONS = {
+  power: '<svg class="ci" viewBox="0 0 24 24"><path d="M11 2h2v10h-2zm6.4 3.2 1.4 1.4A8 8 0 1 1 5.2 6.6l1.4-1.4A6 6 0 1 0 17.4 5.2z"/></svg>',
   back: '<svg class="ci" viewBox="0 0 24 24"><path d="M10 6 4 12l6 6v-4h6a4 4 0 0 0 4-4V6h-2v4a2 2 0 0 1-2 2h-6V6z"/></svg>',
   home: '<svg class="ci" viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3z"/></svg>',
   chat: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 4h16v11H8l-4 4zM7 8h10v2H7zm0 3h7v2H7z"/></svg>',

@@ -6,6 +6,7 @@ const { pathToFileURL } = require('url');
 const steam = require('./steam');
 const system = require('./system');
 const gamepad = require('./gamepad');
+const discord = require('./discord');
 
 let autoUpdater = null;
 try {
@@ -215,7 +216,27 @@ ipcMain.handle('steam:sales', (_e, steamId) => steam.sales(steamId).catch(() => 
 ipcMain.handle('steam:achievements', (_e, { appid, key, steamId }) =>
   steam.achievements(String(appid).replace(/\D/g, ''), key, steamId).catch(() => ({ error: 'error' })));
 ipcMain.handle('steam:friends', (_e, { key, steamId }) => steam.friends(key, steamId).catch(() => ({ error: 'network' })));
-ipcMain.handle('steam:check', (_e, { key, steamId }) => steam.checkAccount(key, steamId).catch(() => ({ error: 'network' })));
+ipcMain.handle('steam:playerGames', (_e, { key, steamId }) => steam.playerGames(key, steamId).catch(() => ({ error: 'network' })));
+// fresh=true skips the cache — used right after a game closes to catch newly unlocked trophies
+ipcMain.handle('steam:achievementsFresh', (_e, { appid, key, steamId }) => {
+  steam.clearCache(`ach${String(appid).replace(/\D/g, '')}:`);
+  return steam.achievements(String(appid).replace(/\D/g, ''), key, steamId).catch(() => ({ error: 'error' }));
+});
+
+// ---------- Discord / power ----------
+ipcMain.handle('discord:config', (_e, id) => discord.configure(id));
+ipcMain.handle('discord:activity', (_e, a) => discord.setActivity(a));
+ipcMain.handle('discord:status', () => discord.isConnected());
+ipcMain.handle('power:do', (_e, action) => {
+  const run = (cmd, args) => spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  if (action === 'shutdown') run('shutdown', ['/s', '/t', '0']);
+  else if (action === 'restart') run('shutdown', ['/r', '/t', '0']);
+  else if (action === 'sleep') {
+    run('powershell', ['-NoProfile', '-Command', "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState('Suspend', $false, $false)"]);
+  } else if (action === 'quit') app.quit();
+});
+
+ipcMain.handle('steam:check',(_e, { key, steamId }) => steam.checkAccount(key, steamId).catch(() => ({ error: 'network' })));
 
 // ---------- System ----------
 ipcMain.handle('sys:stats', () => system.stats());

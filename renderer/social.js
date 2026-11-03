@@ -16,6 +16,7 @@ let me = null;               // { sk: Uint8Array, pk: hex }
 let subs = [];
 let friendSub = null;
 let presenceTimer = null;
+let friendsFeedTimer = null;
 const social = { open: false, zone: 'list', idx: 0, chat: null, chatFocus: 0, presence: {}, profiles: {}, seen: new Set() };
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -45,6 +46,7 @@ function socialStart() {
   ];
   subscribeFriends();
   publishPresence();
+  publishLibrarySoon();
   clearInterval(presenceTimer);
   presenceTimer = setInterval(publishPresence, 2 * 60e3);
   updateDot();
@@ -67,6 +69,9 @@ function subscribeFriends() {
       } else {
         const cur = social.presence[ev.pubkey];
         if (!cur || cur.at < ev.created_at * 1000) social.presence[ev.pubkey] = { text: ev.content, at: ev.created_at * 1000 };
+        // "what friends are playing" lives in the feed too
+        clearTimeout(friendsFeedTimer);
+        friendsFeedTimer = setTimeout(refreshFriends, 1500);
       }
       renderSocialSoon();
     }
@@ -97,6 +102,31 @@ function myStatus() {
 function publishPresence() {
   if (!me) return;
   publish({ kind: 30315, tags: [['d', 'general'], ['expiration', String(now() + 600)]], content: myStatus() });
+}
+
+// Friends can open our profile: share the game list (names, Steam ids, playtime) and the latest trophy
+function publishLibrary() {
+  if (!me) return;
+  const games = data.games
+    .filter((g) => g.category !== 'app')
+    .sort((a, b) => lastPlayedOf(b) - lastPlayedOf(a))
+    .slice(0, 40)
+    .map((g) => ({ n: g.name, s: steamIdOf(g) || undefined, p: Math.round(totalPlaytime(g)) || undefined, l: lastPlayedOf(g) || undefined }));
+  publish({ kind: 30078, tags: [['d', 'ps5l-library']], content: JSON.stringify({ games, since: data.settings.since, trophy: data.lastTrophy || null }) });
+}
+let libTimer;
+function publishLibrarySoon() {
+  clearTimeout(libTimer);
+  libTimer = setTimeout(publishLibrary, 4000);
+}
+async function fetchLibrary(pk) {
+  if (!pool) return null;
+  try {
+    const ev = await pool.get(RELAYS, { kinds: [30078], authors: [pk], '#d': ['ps5l-library'] });
+    return ev ? JSON.parse(ev.content) : null;
+  } catch {
+    return null;
+  }
 }
 
 function presenceOf(pk) {
@@ -584,5 +614,5 @@ function openFriendMenu(pk) {
 }
 
 // keep presence fresh when a game starts / stops
-ipc.onSteamRunning(() => setTimeout(publishPresence, 1500));
-ipc.onGameExited(() => setTimeout(publishPresence, 1500));
+ipc.onSteamRunning(() => { setTimeout(publishPresence, 1500); publishLibrarySoon(); });
+ipc.onGameExited(() => { setTimeout(publishPresence, 1500); publishLibrarySoon(); });

@@ -1,0 +1,159 @@
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      TextElement.FontFamily="Segoe UI Variable Display, Segoe UI" TextElement.Foreground="White">
+  <Grid.Resources>
+    <Style x:Key="Pill" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" CornerRadius="27" Height="54" Padding="46,0">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                  <GradientStop Color="#6BB8FF" Offset="0"/>
+                  <GradientStop Color="#2F6BFF" Offset="1"/>
+                </LinearGradientBrush>
+              </Border.Background>
+              <Border.Effect><DropShadowEffect Color="#2F6BFF" BlurRadius="28" ShadowDepth="0" Opacity="0.75"/></Border.Effect>
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.03" ScaleY="1.03" CenterX="90" CenterY="27"/></Setter.Value></Setter></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.85"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Ghost" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#C9D6F5"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" CornerRadius="10" Padding="12,6" Background="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#22FFFFFF"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Grid.Resources>
+
+  <!-- window body -->
+  <Border CornerRadius="22" Margin="14">
+    <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="6" Opacity="0.6" Color="#000814"/></Border.Effect>
+    <Border.Background>
+      <RadialGradientBrush GradientOrigin="0.18,0.08" Center="0.25,0.15" RadiusX="1.1" RadiusY="1.25">
+        <GradientStop Color="#2C6DFF" Offset="0"/>
+        <GradientStop Color="#0B2A7A" Offset="0.36"/>
+        <GradientStop Color="#040B26" Offset="0.74"/>
+        <GradientStop Color="#02050F" Offset="1"/>
+      </RadialGradientBrush>
+    </Border.Background>
+  </Border>
+  <Grid Margin="14" ClipToBounds="True">
+    <Grid.Clip><RectangleGeometry Rect="0,0,792,472" RadiusX="22" RadiusY="22"/></Grid.Clip>
+
+    <!-- light streaks -->
+    <Rectangle Width="900" Height="2" Margin="-60,250,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5">
+      <Rectangle.RenderTransform><RotateTransform Angle="-18"/></Rectangle.RenderTransform>
+      <Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00FFFFFF"/><GradientStop Color="#668CBEFF" Offset="0.5"/><GradientStop Color="#00FFFFFF" Offset="1"/></LinearGradientBrush></Rectangle.Fill>
+    </Rectangle>
+    <Rectangle Width="900" Height="1" Margin="-60,300,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5">
+      <Rectangle.RenderTransform><RotateTransform Angle="-18"/></Rectangle.RenderTransform>
+      <Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00FFFFFF"/><GradientStop Color="#448CBEFF" Offset="0.5"/><GradientStop Color="#00FFFFFF" Offset="1"/></LinearGradientBrush></Rectangle.Fill>
+    </Rectangle>
+    <Ellipse Width="420" Height="420" Margin="0,0,-160,-200" HorizontalAlignment="Right" VerticalAlignment="Bottom" Opacity="0.35">
+      <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#3D7BFF"/><GradientStop Color="#003D7BFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+    </Ellipse>
+
+    <!-- title bar buttons -->
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,12,0">
+      <Button x:Name="BtnMin" Style="{StaticResource Ghost}"><TextBlock Text="—" FontSize="13"/></Button>
+      <Button x:Name="BtnClose" Style="{StaticResource Ghost}"><TextBlock Text="✕" FontSize="13"/></Button>
+    </StackPanel>
+
+    <Grid Margin="48,46,48,40">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="270"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+      <!-- brand -->
+      <StackPanel VerticalAlignment="Center">
+        <Image x:Name="Logo" Width="132" Height="132" HorizontalAlignment="Left" RenderOptions.BitmapScalingMode="HighQuality">
+          <Image.Effect><DropShadowEffect Color="#3D7BFF" BlurRadius="40" ShadowDepth="0" Opacity="0.85"/></Image.Effect>
+        </Image>
+        <TextBlock Text="PS5 Launcher" FontSize="34" FontWeight="SemiBold" Margin="0,26,0,0"/>
+        <TextBlock Text="Игровой лаунчер в стиле PS5" FontSize="15" Foreground="#B8C7EA" Margin="0,6,0,0"/>
+        <TextBlock x:Name="VersionText" Text="Проверяем последнюю версию…" FontSize="13" Foreground="#7E8FB8" Margin="0,22,0,0"/>
+      </StackPanel>
+
+      <!-- welcome -->
+      <StackPanel x:Name="PWelcome" Grid.Column="1" VerticalAlignment="Center" Margin="34,0,0,0">
+        <TextBlock x:Name="WelcomeTitle" Text="Всё готово к установке" FontSize="26" FontWeight="SemiBold"/>
+        <StackPanel Margin="0,18,0,0">
+          <StackPanel.Resources>
+            <Style TargetType="TextBlock"><Setter Property="FontSize" Value="14.5"/><Setter Property="Foreground" Value="#D5E0FA"/><Setter Property="Margin" Value="0,5,0,0"/></Style>
+          </StackPanel.Resources>
+          <TextBlock><Run Text="●  " Foreground="#5BB0FF"/>Управление геймпадом и экранная клавиатура</TextBlock>
+          <TextBlock><Run Text="●  " Foreground="#5BB0FF"/>Живые фоны, новости и трофеи Steam</TextBlock>
+          <TextBlock><Run Text="●  " Foreground="#5BB0FF"/>Друзья, чат и Центр управления по кнопке Xbox</TextBlock>
+          <TextBlock><Run Text="●  " Foreground="#5BB0FF"/>Обновляется автоматически</TextBlock>
+        </StackPanel>
+        <Border CornerRadius="12" Background="#1AFFFFFF" Padding="14,10" Margin="0,26,0,0">
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock Text="ПАПКА УСТАНОВКИ" FontSize="10.5" Foreground="#7E8FB8"/>
+              <TextBlock x:Name="PathText" FontSize="13" Foreground="#E6EEFF" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+            </StackPanel>
+            <Button x:Name="BtnChange" Grid.Column="1" Style="{StaticResource Ghost}" VerticalAlignment="Center"><TextBlock Text="Изменить" FontSize="13" Foreground="#8FC2FF"/></Button>
+          </Grid>
+        </Border>
+        <Button x:Name="BtnInstall" Style="{StaticResource Pill}" HorizontalAlignment="Left" Margin="0,28,0,0">
+          <TextBlock x:Name="BtnInstallText" Text="Установить" FontSize="17" FontWeight="SemiBold"/>
+        </Button>
+      </StackPanel>
+
+      <!-- progress -->
+      <StackPanel x:Name="PProgress" Grid.Column="1" VerticalAlignment="Center" Margin="34,0,0,0" Visibility="Collapsed">
+        <TextBlock x:Name="Status" Text="Загрузка…" FontSize="20" FontWeight="SemiBold"/>
+        <TextBlock x:Name="Percent" Text="0%" FontSize="64" FontWeight="Light" Margin="0,8,0,0"/>
+        <Grid Margin="0,14,0,0">
+          <Border x:Name="Track" Height="8" CornerRadius="4" Background="#26FFFFFF"/>
+          <Border x:Name="Fill" Height="8" CornerRadius="4" HorizontalAlignment="Left" Width="8">
+            <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#6BB8FF"/><GradientStop Color="#2F6BFF" Offset="1"/></LinearGradientBrush></Border.Background>
+            <Border.Effect><DropShadowEffect Color="#4F9BFF" BlurRadius="16" ShadowDepth="0" Opacity="0.9"/></Border.Effect>
+          </Border>
+        </Grid>
+        <TextBlock x:Name="Detail" FontSize="13" Foreground="#9FB0D8" Margin="0,14,0,0" TextTrimming="CharacterEllipsis"/>
+      </StackPanel>
+
+      <!-- done -->
+      <StackPanel x:Name="PDone" Grid.Column="1" VerticalAlignment="Center" Margin="34,0,0,0" Visibility="Collapsed">
+        <Grid Width="72" Height="72" HorizontalAlignment="Left">
+          <Ellipse>
+            <Ellipse.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#5BE38A"/><GradientStop Color="#1FA85A" Offset="1"/></LinearGradientBrush></Ellipse.Fill>
+            <Ellipse.Effect><DropShadowEffect Color="#3DDC84" BlurRadius="30" ShadowDepth="0" Opacity="0.7"/></Ellipse.Effect>
+          </Ellipse>
+          <Path Data="M22,37 L32,47 L51,27" Stroke="White" StrokeThickness="6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+        </Grid>
+        <TextBlock Text="PS5 Launcher установлен" FontSize="26" FontWeight="SemiBold" Margin="0,22,0,0"/>
+        <TextBlock Text="Ярлык добавлен на рабочий стол и в меню «Пуск». Совет: кнопка Xbox на геймпаде вызывает лаунчер из любой игры." FontSize="14" Foreground="#C9D6F5" TextWrapping="Wrap" Margin="0,10,0,0"/>
+        <StackPanel Orientation="Horizontal" Margin="0,28,0,0">
+          <Button x:Name="BtnLaunch" Style="{StaticResource Pill}"><TextBlock Text="Запустить" FontSize="17" FontWeight="SemiBold"/></Button>
+          <Button x:Name="BtnDone" Style="{StaticResource Ghost}" Margin="14,0,0,0" VerticalAlignment="Center"><TextBlock Text="Закрыть" FontSize="15"/></Button>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- error -->
+      <StackPanel x:Name="PError" Grid.Column="1" VerticalAlignment="Center" Margin="34,0,0,0" Visibility="Collapsed">
+        <TextBlock Text="Не получилось установить" FontSize="26" FontWeight="SemiBold"/>
+        <TextBlock x:Name="ErrorText" FontSize="14" Foreground="#FFB3BE" TextWrapping="Wrap" Margin="0,12,0,0"/>
+        <Button x:Name="BtnRetry" Style="{StaticResource Pill}" HorizontalAlignment="Left" Margin="0,28,0,0"><TextBlock Text="Повторить" FontSize="17" FontWeight="SemiBold"/></Button>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Grid>

@@ -32,7 +32,7 @@
       <button class="icon-btn focusable" data-zone="tabs" data-action="settings" title="Настройки">
         <svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
       </button>
-      <div class="avatar" id="avatar">P</div>
+      <button class="avatar focusable" id="avatar" data-action="profile" title="Профиль">P</button>
       <div class="clock" id="clock">00:00</div>
     </div>
   </header>
@@ -61,6 +61,7 @@
   </div>
 
   <div class="social hidden" id="social"></div>
+  <div class="social profile hidden" id="profile"></div>
   <div class="cc hidden" id="cc"></div>
   <div class="osk hidden" id="osk"></div>
   <div class="toast hidden" id="toast"></div>
@@ -71,5 +72,6 @@
   <script src="feed.js"></script>
   <script src="overlays.js"></script>
   <script src="social.js"></script>
+  <script src="profile.js"></script>
 </body>
 </html>

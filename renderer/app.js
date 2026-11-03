@@ -213,10 +213,59 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------- Rendering ----------
+const SORT_NAMES = { recent: 'Недавние', alpha: 'По алфавиту', custom: 'Свой порядок' };
 function sortedItems() {
-  return data.games
-    .filter((g) => (g.category || 'game') === tab)
-    .sort((a, b) => lastPlayedOf(b) - lastPlayedOf(a) || (b.added || 0) - (a.added || 0));
+  const mode = data.settings.sortMode || 'recent';
+  const items = data.games.filter((g) => (g.category || 'game') === tab);
+  if (mode === 'alpha') return items.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  if (mode === 'custom') return items.sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || (b.added || 0) - (a.added || 0));
+  return items.sort((a, b) => lastPlayedOf(b) - lastPlayedOf(a) || (b.added || 0) - (a.added || 0));
+}
+
+// ---------- Custom order ----------
+// Switching to the custom order freezes whatever order is on screen right now, then tiles can be moved
+function freezeOrder() {
+  if (data.settings.sortMode !== 'custom') {
+    for (const t of TABS) {
+      const prevTab = tab;
+      tab = t;
+      sortedItems().forEach((g, i) => (g.order = i));
+      tab = prevTab;
+    }
+    data.settings.sortMode = 'custom';
+  }
+  list.forEach((g, i) => (g.order = i));
+}
+function moveToFront(g) {
+  freezeOrder();
+  list.forEach((x) => { if (x !== g) x.order += 1; });
+  g.order = 0;
+  save();
+  render(g.id);
+  toast(`«${g.name}» теперь первая`);
+}
+let reorder = false;
+function startReorder() {
+  if (!list[sel]) return;
+  freezeOrder();
+  reorder = true;
+  zone = 'row';
+  update();
+  toast('Двигайте плитку влево и вправо, ✕ / Enter — готово');
+}
+function reorderHandle(act) {
+  const g = list[sel];
+  if ((act === 'left' && sel > 0) || (act === 'right' && sel < list.length - 1)) {
+    const j = act === 'left' ? sel - 1 : sel + 1;
+    [list[sel].order, list[j].order] = [list[j].order, list[sel].order];
+    sfx.move();
+    render(g.id);
+  } else if (act === 'ok' || act === 'back') {
+    reorder = false;
+    sfx.ok();
+    save();
+    update();
+  }
 }
 
 function tileHTML(g, i) {
@@ -267,6 +316,7 @@ function update(force) {
   tiles.forEach((t, i) => {
     t.classList.toggle('sel', i === sel);
     t.classList.toggle('before', i < first);
+    t.classList.toggle('moving', reorder && i === sel);
   });
   const { w, gap } = tileMetrics();
   track.style.transform = `translateX(${-first * (w + gap)}px)`;
@@ -274,7 +324,7 @@ function update(force) {
   // focus rings
   $('#row').classList.toggle('focused', zone === 'row');
   $$('.tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  const tabEls = [...$$('.tabs .tab'), $('[data-action="search"]'), $('[data-action="friends"]'), $('[data-action="settings"]')];
+  const tabEls = [...$$('.tabs .tab'), $('[data-action="search"]'), $('[data-action="friends"]'), $('[data-action="settings"]'), $('[data-action="profile"]')];
   tabEls.forEach((t, i) => t.classList.toggle('focus', zone === 'tabs' && i === tabFocus));
   const g = list[sel];
   const actEls = g ? [$('#btnPlay'), $('#btnMore')] : [$('#btnPlay')];
@@ -422,7 +472,9 @@ async function launch(g) {
 
 async function finishLaunch(g, ov, stepAside) {
   launching = null;
+  if (stepAside) launchStarted[g.id] = Date.now();
   publishPresence();
+  updateDiscord();
   // rebuild the row underneath the overlay so the reorder is never visible
   zone = 'row';
   render(g.id);
@@ -664,6 +716,8 @@ function openOptions() {
   const items = [
     ['play', g.category === 'app' ? 'Открыть' : 'Играть'],
     ['edit', 'Изменить'],
+    ['first', 'Сделать первой в списке'],
+    ['reorder', 'Переставить'],
     ['bg', 'Установить свой фон'],
     ...(g.background ? [['bgReset', 'Убрать свой фон']] : []),
     ...(isFilePath(g.path) ? [['folder', 'Показать в папке']] : []),
@@ -677,6 +731,8 @@ function openOptions() {
     if (id === 'play') { closeModal(); launch(g); }
     if (id === 'edit') openEditor(g);
     if (id === 'folder') { closeModal(); ipc.showItem(g.path); }
+    if (id === 'first') { closeModal(); moveToFront(g); }
+    if (id === 'reorder') { closeModal(); startReorder(); }
     if (id === 'bg' || id === 'bgReset') {
       let url = '';
       if (id === 'bg') {
@@ -749,6 +805,8 @@ function openSettings(focus = 0) {
     ['user', 'Имя пользователя', s.user],
     ['steam', 'Импорт игр из Steam', ''],
     ['account', 'Аккаунт Steam (трофеи, друзья)', s.steamApiKey ? 'Подключён' : 'Не подключён'],
+    ['discord', 'Discord (статус «Играет в…»)', s.discordId ? 'Подключён' : 'Не подключён'],
+    ['sort', 'Порядок игр', SORT_NAMES[s.sortMode || 'recent']],
     ['sep'],
     ['wallpaper', 'Общий фон (картинка или видео)', s.wallpaper ? 'Свой' : 'Стандартный'],
     ...(s.wallpaper ? [['wallpaperReset', 'Сбросить общий фон', '']] : []),
@@ -761,7 +819,7 @@ function openSettings(focus = 0) {
     ['autostart', 'Запускать вместе с Windows', onoff(s.autostart)],
     ['sep'],
     ['update', 'Проверить обновления', updateState.latest && updateState.status === 'available' ? `Доступна ${updateState.latest}` : `Версия ${appVersion}`],
-    ['quit', 'Выйти из лаунчера', '', 'danger']
+    ['power', 'Питание', 'сон, перезагрузка, выключение', 'danger']
   ];
   openModal(`<h2 style="padding:10px 18px 0">Настройки</h2>` + items.map(([id, label, val, cls]) => (id === 'sep'
     ? '<div class="menu-sep"></div>'
@@ -782,6 +840,15 @@ function openSettings(focus = 0) {
     if (id === 'sounds') return toggle('sounds');
     if (id === 'fullscreen') return toggle('fullscreen', ipc.setFullscreen);
     if (id === 'account') return openSteamAccount();
+    if (id === 'discord') return openDiscordSetup();
+    if (id === 'power') return openPower();
+    if (id === 'sort') {
+      const order = ['recent', 'alpha', 'custom'];
+      s.sortMode = order[(order.indexOf(s.sortMode || 'recent') + 1) % order.length];
+      await save();
+      render(list[sel]?.id);
+      return openSettings(i);
+    }
     if (id === 'update') return openUpdate();
     if (id === 'trailers') {
       s.liveTrailers = !s.liveTrailers;
@@ -937,7 +1004,9 @@ function handle(act, src) {
   if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);
   if (cc.open) return ccHandle(act);
+  if (profileOpen()) return profileHandle(act);
   if (socialOpen()) return socialHandle(act, src);
+  if (reorder) return reorderHandle(act);
   const count = list.length + 1;
   const prevZone = zone;
 
@@ -952,13 +1021,14 @@ function handle(act, src) {
     else if (act === 'ok') { sfx.ok(); return activate(); }
   } else if (zone === 'tabs') {
     if (act === 'left' && tabFocus > 0) { tabFocus--; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
-    else if (act === 'right' && tabFocus < 4) { tabFocus++; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
+    else if (act === 'right' && tabFocus < 5) { tabFocus++; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
     else if (act === 'down' || act === 'back') zone = 'row';
     else if (act === 'ok') {
       sfx.ok();
       if (tabFocus === 2) return openSearch();
       if (tabFocus === 3) return openSocial();
       if (tabFocus === 4) return openSettings();
+      if (tabFocus === 5) return openProfile();
       switchTab(TABS[tabFocus]);
       zone = 'row';
     }
@@ -1077,6 +1147,7 @@ $$('.tabs .tab').forEach((t) => (t.onclick = () => { zone = 'row'; switchTab(t.d
 $('[data-action="settings"]').onclick = () => { sfx.ok(); openSettings(); };
 $('[data-action="search"]').onclick = () => { sfx.ok(); openSearch(); };
 $('[data-action="friends"]').onclick = () => { sfx.ok(); openSocial(); };
+$('[data-action="profile"]').onclick = () => { sfx.ok(); openProfile(); };
 $('#btnPlay').onclick = () => { sfx.ok(); activate(); };
 $('#btnMore').onclick = () => { sfx.ok(); openOptions(); };
 
@@ -1119,6 +1190,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   feedInit();
   render();
   socialStart();
+  profileInit();
   requestAnimationFrame(pollPads);
   // fade in once the first frame is laid out
   setTimeout(() => document.body.classList.remove('booting'), 120);
