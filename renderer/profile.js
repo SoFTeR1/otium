@@ -71,11 +71,12 @@ function trophyCard(t) {
   return `<div class="pfi pf-trophy">${t.icon ? `<div class="ti" style="background-image:${esc(cssUrl(t.icon))}"></div>` : '<div class="ti">🏆</div>'}
     <div><div class="d">${esc(t.game || '')}</div><div class="t">${esc(t.name)}</div><div class="d">${t.time ? fmtDate(t.time) : ''}</div></div></div>`;
 }
-function gameCard(name, steamId, sub, attrs = '') {
-  const c = coverOf(steamId);
+// cover: the art the launcher already shows for the game; otherwise Steam's portrait art (with fallbacks)
+function gameCard(name, steamId, sub, attrs = '', cover = '') {
+  const c = (cover && !isVideo(cover) ? cover : '') || coverOf(steamId);
   const h = hue(name);
   return `<div class="pfi pf-game" ${attrs}>
-    <div class="gc" style="${c ? `background-image:${esc(cssUrl(c))}` : `background:linear-gradient(135deg,hsl(${h} 70% 38%),hsl(${(h + 50) % 360} 70% 26%))`}">${c ? '' : esc(initials(name))}</div>
+    <div class="gc" data-sid="${esc(steamId || '')}" data-name="${esc(name)}" style="${c ? `background-image:${esc(cssUrl(c))}` : `background:linear-gradient(135deg,hsl(${h} 70% 38%),hsl(${(h + 50) % 360} 70% 26%))`}">${c ? '' : esc(initials(name))}</div>
     <div class="t">${esc(name)}</div><div class="d">${esc(sub || '')}</div></div>`;
 }
 function statChip(n, label) {
@@ -106,7 +107,7 @@ async function renderProfile() {
         <div class="pf-stats">${statChip(games.length, 'игр')}${statChip(hours(total), 'наиграно')}${statChip(lf.length, 'друзей')}</div>
       </div>
       <div class="pf-sec"><div class="fhead">Последний трофей</div>${trophyCard(data.lastTrophy)}</div>
-      <div class="pf-sec"><div class="fhead">Недавние игры</div><div class="pf-row">${recent.length ? recent.map((g) => gameCard(g.name, steamIdOf(g), [hours(totalPlaytime(g)), fmtDate(lastPlayedOf(g))].join(' · '), `data-game="${g.id}"`)).join('') : '<div class="pf-empty">Вы ещё ничего не запускали</div>'}</div></div>
+      <div class="pf-sec"><div class="fhead">Недавние игры</div><div class="pf-row">${recent.length ? recent.map((g) => gameCard(g.name, steamIdOf(g), [hours(totalPlaytime(g)), fmtDate(lastPlayedOf(g))].join(' · '), `data-game="${g.id}"`, g.cover)).join('') : '<div class="pf-empty">Вы ещё ничего не запускали</div>'}</div></div>
       <div class="pf-sec"><div class="fhead">Друзья</div><div class="pf-row">
         ${lf.map((f) => friendCard(f.name, f.pk, presenceOf(f.pk), `data-friend="${f.pk}"`)).join('')}
         ${sf.map((f) => friendCard(f.name, f.id, { online: true, game: !!f.game, text: f.game ? `В игре: ${f.game}` : 'В сети · Steam' }, `data-steam="${f.id}"`, f.avatar)).join('')}
@@ -153,12 +154,27 @@ async function renderProfile() {
 
   el.innerHTML = profileShell(title, back, body);
   $$('#profile .pfi').forEach((n, i) => (n.onclick = () => { pf.idx = i; focusProfile(); activateProfileItem(n); }));
+  // newer Steam games often lack the portrait art: fall back to the wide header, then to initials
   $$('#profile .gc').forEach((g) => {
     const m = g.style.backgroundImage.match(/url\("(.+)"\)/);
     if (!m) return;
-    const im = new Image();
-    im.onerror = () => { g.style.backgroundImage = ''; g.style.background = '#2a3042'; };
-    im.src = m[1];
+    const tries = [m[1]];
+    if (g.dataset.sid) tries.push(`https://cdn.cloudflare.steamstatic.com/steam/apps/${g.dataset.sid}/header.jpg`);
+    const next = () => {
+      const url = tries.shift();
+      if (!url) {
+        const h = hue(g.dataset.name);
+        g.style.backgroundImage = '';
+        g.style.background = `linear-gradient(135deg,hsl(${h} 70% 38%),hsl(${(h + 50) % 360} 70% 26%))`;
+        g.textContent = initials(g.dataset.name);
+        return;
+      }
+      const im = new Image();
+      im.onload = () => (g.style.backgroundImage = cssUrl(url));
+      im.onerror = next;
+      im.src = url;
+    };
+    next();
   });
   focusProfile();
 }
@@ -193,7 +209,7 @@ function activateProfileItem(n) {
   if (n.dataset.game) {
     const g = data.games.find((x) => x.id === n.dataset.game);
     closeProfile();
-    tab = g.category || 'game';
+    tab = 'game';
     zone = 'actions';
     render(g.id);
   }

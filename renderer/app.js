@@ -15,7 +15,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const cssUrl = (u) => `url("${String(u).replace(/["\\]/g, '\\$&')}")`;
 
-const TABS = ['game', 'app'];
+const TABS = ['game', 'activity'];
 const DIRS = new Set(['up', 'down', 'left', 'right']);
 
 let data = { games: [], settings: {} };
@@ -216,17 +216,47 @@ document.addEventListener('visibilitychange', () => {
 const SORT_NAMES = { recent: 'Недавние', alpha: 'По алфавиту', custom: 'Свой порядок' };
 function sortedItems() {
   const mode = data.settings.sortMode || 'recent';
-  const items = data.games.filter((g) => (g.category || 'game') === tab);
+  if (tab === 'activity') return activityItems();
+  // apps (the old "Media" tab) live alongside games
+  const items = [...data.games];
   if (mode === 'alpha') return items.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   if (mode === 'custom') return items.sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || (b.added || 0) - (a.added || 0));
   return items.sort((a, b) => lastPlayedOf(b) - lastPlayedOf(a) || (b.added || 0) - (a.added || 0));
+}
+
+// ---------- Activity tab: friends as tiles, players in a game first ----------
+const STEAM_ART = 'https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps';
+function activityItems() {
+  const items = [];
+  for (const f of (typeof acct === 'function' && acct()?.friends) || []) {
+    const p = presenceOf(f.pk);
+    items.push({ id: 'lf:' + f.pk, kind: 'friend', src: 'launcher', pk: f.pk, name: f.name, online: p.online, game: p.game ? p.text.replace(/^В игре: /, '') : null, status: p.text });
+  }
+  for (const f of steamFriendsCache || []) {
+    const online = f.state > 0 || !!f.game;
+    items.push({
+      id: 'sf:' + f.id, kind: 'friend', src: 'steam', sid: f.id, name: f.name, cover: f.avatar, online, game: f.game, gameId: f.gameId,
+      hero: f.gameId ? `${STEAM_ART}/${f.gameId}/library_hero.jpg` : '',
+      status: f.game ? `В игре: ${f.game}` : f.state === 1 ? 'В сети' : f.state ? 'Нет на месте' : 'Не в сети'
+    });
+  }
+  return items.sort((a, b) => !!b.game - !!a.game || b.online - a.online || a.name.localeCompare(b.name, 'ru'));
+}
+function friendView(f) {
+  return f.src === 'steam' ? { kind: 'steam', id: f.sid } : { kind: 'friend', id: f.pk };
+}
+function chatWith(f) {
+  if (f.src === 'steam') return ipc.openUrl(`steam://friends/message/${f.sid}`);
+  openSocial();
+  social.idx = listItems().findIndex((x) => x.pk === f.pk);
+  activateItem();
 }
 
 // ---------- Custom order ----------
 // Switching to the custom order freezes whatever order is on screen right now, then tiles can be moved
 function freezeOrder() {
   if (data.settings.sortMode !== 'custom') {
-    for (const t of TABS) {
+    for (const t of ['game']) {
       const prevTab = tab;
       tab = t;
       sortedItems().forEach((g, i) => (g.order = i));
@@ -269,7 +299,11 @@ function reorderHandle(act) {
 }
 
 function tileHTML(g, i) {
-  if (!g) return `<div class="tile add" data-i="${i}">+<span class="name">${tab === 'game' ? 'Добавить игру' : 'Добавить приложение'}</span></div>`;
+  if (!g) return `<div class="tile add" data-i="${i}">+<span class="name">${tab === 'game' ? 'Добавить игру' : 'Найти друзей'}</span></div>`;
+  if (g.kind === 'friend') {
+    const fh = hue(g.pk || g.sid);
+    return `<div class="tile friend${g.online ? '' : ' offline'}" data-i="${i}">${g.cover ? '' : `<div class="ph" style="--c1:hsl(${fh} 65% 45%);--c2:hsl(${(fh + 60) % 360} 65% 30%)">${esc(g.name[0].toUpperCase())}</div>`}<i class="pres ${g.game ? 'game' : g.online ? 'on' : ''}"></i><span class="name">${esc(g.name)}</span></div>`;
+  }
   const h = hue(g.name);
   const ph = `<div class="ph" style="--c1:hsl(${h} 70% 38%);--c2:hsl(${(h + 50) % 360} 70% 26%)">${esc(initials(g.name))}</div>`;
   return `<div class="tile" data-i="${i}" data-id="${g.id}">${g.cover ? '' : ph}<span class="name">${esc(g.name)}</span></div>`;
@@ -355,13 +389,24 @@ function fillInfo(g) {
   info.classList.toggle('empty', !g);
   logo.classList.remove('show');
   title.classList.remove('hidden');
+  if (!g && tab === 'activity') {
+    title.textContent = 'Найти друзей';
+    $('#meta').innerHTML = `<span>${list.length ? 'Добавьте друзей по нику или коду' : 'Здесь будут друзья из PS5 Launcher и Steam — и во что они играют'}</span>`;
+    $('#btnPlay').textContent = 'Найти';
+    return;
+  }
   if (!g) {
-    title.textContent = tab === 'game' ? 'Добавить игру' : 'Добавить приложение';
+    title.textContent = 'Добавить игру';
     $('#meta').innerHTML = `<span>${list.length ? 'Укажите exe, ярлык или ссылку' : 'Библиотека пуста — добавьте первую игру или импортируйте из Steam в настройках'}</span>`;
     $('#btnPlay').textContent = 'Добавить';
     return;
   }
   title.textContent = g.name;
+  if (g.kind === 'friend') {
+    $('#meta').innerHTML = `<span class="${g.game ? 'live' : ''}">● ${esc(g.status)}</span><span>${g.src === 'steam' ? 'Друг в Steam' : 'Друг в PS5 Launcher'}</span>`;
+    $('#btnPlay').textContent = 'Профиль';
+    return;
+  }
   if (g.logo) {
     logo.onload = () => { logo.classList.add('show'); title.classList.add('hidden'); };
     logo.onerror = () => { logo.classList.remove('show'); title.classList.remove('hidden'); };
@@ -548,6 +593,8 @@ async function loadSteamLocal() {
 
 function activate() {
   const g = list[sel];
+  if (g?.kind === 'friend') return openProfile(friendView(g));
+  if (!g && tab === 'activity') { openSocial(); social.idx = 1; return activateItem(); }
   if (g) launch(g);
   else openEditor();
 }
@@ -702,7 +749,7 @@ function openEditor(game) {
     }
     await save();
     closeModal();
-    tab = rec.category || 'game';
+    tab = 'game';
     zone = 'row';
     render(rec.id);
     toast(game ? 'Сохранено' : `«${name}» добавлена в библиотеку`);
@@ -712,7 +759,14 @@ function openEditor(game) {
 // ---------- Options menu ----------
 function openOptions() {
   const g = list[sel];
-  if (!g) return openEditor();
+  if (!g) return tab === 'activity' ? activate() : openEditor();
+  if (g.kind === 'friend') {
+    openModal(`<button class="menu-item focusable" id="fProf">Открыть профиль</button>
+      <button class="menu-item focusable" id="fChat">Написать</button>`, { cls: 'menu' });
+    $('#fProf').onclick = () => { closeModal(); openProfile(friendView(g)); };
+    $('#fChat').onclick = () => { closeModal(); chatWith(g); };
+    return;
+  }
   const items = [
     ['play', g.category === 'app' ? 'Открыть' : 'Играть'],
     ['edit', 'Изменить'],
@@ -721,7 +775,6 @@ function openOptions() {
     ['bg', 'Установить свой фон'],
     ...(g.background ? [['bgReset', 'Убрать свой фон']] : []),
     ...(isFilePath(g.path) ? [['folder', 'Показать в папке']] : []),
-    ['move', g.category === 'app' ? 'Переместить в «Игры»' : 'Переместить в «Медиа»'],
     ['sep'],
     ['del', 'Удалить из библиотеки', 'danger']
   ];
@@ -782,13 +835,13 @@ function openSearch() {
     const q = $('#fSearch').value.trim().toLowerCase();
     const found = data.games.filter((g) => !q || g.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
     $('#results').innerHTML = found.length
-      ? found.map((g) => `<button class="steam-item focusable" data-id="${g.id}">${g.cover ? `<img src="${esc(g.cover)}"/>` : ''}${esc(g.name)}<span class="val" style="margin-left:auto">${g.category === 'app' ? 'Медиа' : 'Игры'}</span></button>`).join('')
+      ? found.map((g) => `<button class="steam-item focusable" data-id="${g.id}">${g.cover ? `<img src="${esc(g.cover)}"/>` : ''}${esc(g.name)}<span class="val" style="margin-left:auto">${g.category === 'app' ? 'Приложение' : 'Игра'}</span></button>`).join('')
       : '<div class="meta"><span>Ничего не найдено</span></div>';
     $$('#results img').forEach((img) => (img.onerror = () => (img.style.visibility = 'hidden')));
     $$('#results .steam-item').forEach((b) => (b.onclick = () => {
       const g = data.games.find((x) => x.id === b.dataset.id);
       closeModal();
-      tab = g.category || 'game';
+      tab = 'game';
       zone = 'row';
       render(g.id);
     }));
@@ -1013,7 +1066,11 @@ function handle(act, src) {
   const count = list.length + 1;
   const prevZone = zone;
 
-  if (act === 'add') { sfx.ok(); return openEditor(); }
+  if (act === 'add') {
+    sfx.ok();
+    if (tab === 'activity') { openSocial(); social.idx = 1; return activateItem(); }
+    return openEditor();
+  }
   if (act === 'menu') { sfx.ok(); return openOptions(); }
 
   if (zone === 'row') {

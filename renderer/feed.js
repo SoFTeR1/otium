@@ -276,7 +276,7 @@ function refreshContinue() {
       html: `<div class="cimg" style="background-image:${bg ? esc(cssUrl(bg)) : 'none'}"></div>
         <div class="cbody">${g.logo ? `<img class="clogo" src="${esc(g.logo)}">` : ''}
         <div class="t">${esc(g.name)}</div><div class="d">${esc(sub)}</div></div>`,
-      ok: () => { tab = g.category || 'game'; zone = 'actions'; render(g.id); }
+      ok: () => { tab = 'game'; zone = 'actions'; render(g.id); }
     };
   }), {
     // no logo art → fall back to the plain title
@@ -320,7 +320,7 @@ function refreshStats() {
     cards.splice(1, 0, {
       cls: 'wide stat fav',
       html: `<div class="fimg" style="background-image:${fav.cover ? esc(cssUrl(fav.cover)) : 'none'}"></div><div><div class="d">Любимая игра</div><div class="t">${esc(fav.name)}</div><div class="big">${hours(totalPlaytime(fav))}</div></div>`,
-      ok: () => { tab = fav.category || 'game'; zone = 'actions'; render(fav.id); }
+      ok: () => { tab = 'game'; zone = 'actions'; render(fav.id); }
     });
   }
   setSection('stats', data.games.length ? cards : []);
@@ -364,6 +364,8 @@ async function refreshFriends() {
   }
   const playing = lfOnline.filter((x) => x.p.game).length + (steamFriendsCache || []).filter((f) => f.game).length;
   const total = lfOnline.length + steamOnline;
+  // the Activity tab is built from the same data
+  if (tab === 'activity' && !busy) render(list[sel]?.id);
   setSection('friends', [...lfCards, ...(err ? [err] : []), ...steamCards], {
     title: total ? `Друзья · ${total} в сети${playing ? ` · ${playing} ${plural(playing, 'играет', 'играют', 'играют')}` : ''}` : 'Друзья'
   });
