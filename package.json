@@ -1,0 +1,51 @@
+{
+  "name": "ps5-launcher",
+  "productName": "PS5 Launcher",
+  "version": "1.1.0",
+  "description": "PS5-style game launcher for Windows",
+  "author": "SoFTeR1",
+  "repository": "github:SoFTeR1/ps5-launcher",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "vendor": "node -e \"require('fs').copyFileSync('node_modules/hls.js/dist/hls.min.js','renderer/vendor/hls.min.js')\""
+  },
+  "build": {
+    "appId": "local.ps5launcher",
+    "productName": "PS5 Launcher",
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PS5 Launcher",
+      "artifactName": "PS5-Launcher-Setup-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "SoFTeR1",
+      "repo": "ps5-launcher"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "steam.js",
+      "system.js",
+      "renderer/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "hls.js": "^1.7.4"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}
