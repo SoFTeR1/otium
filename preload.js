@@ -5,7 +5,7 @@ const on = (ch) => (cb) => ipcRenderer.on(ch, (_e, d) => cb(d));
 contextBridge.exposeInMainWorld('api', {
   load: () => ipcRenderer.invoke('lib:load'),
   save: (data) => ipcRenderer.invoke('lib:save', data),
-  openFile: (kind) => ipcRenderer.invoke('dlg:open', kind),
+  openFile: (kind, multi) => ipcRenderer.invoke('dlg:open', kind, multi),
   importMedia: (src) => ipcRenderer.invoke('media:import', src),
   exeIcon: (exe) => ipcRenderer.invoke('exe:icon', exe),
 
@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   discordActivity: (a) => ipcRenderer.invoke('discord:activity', a),
   discordStatus: () => ipcRenderer.invoke('discord:status'),
   power: (action) => ipcRenderer.invoke('power:do', action),
+  audio: (cmd) => ipcRenderer.invoke('audio:cmd', cmd),
+  appIcon: (p) => ipcRenderer.invoke('audio:icon', p),
 
   sysStats: () => ipcRenderer.invoke('sys:stats'),
   media: (cmd) => ipcRenderer.invoke('media:cmd', cmd),

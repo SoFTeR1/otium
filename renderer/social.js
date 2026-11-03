@@ -169,7 +169,7 @@ async function onDM(ev) {
       if (a.outgoing.includes(other)) return addFriend(other, ctrl.n, true);
       if (!a.requests.some((r) => r.pk === other)) {
         a.requests.push({ pk: other, name: ctrl.n || nameOf(other), at: ev.created_at * 1000 });
-        if (Date.now() - ev.created_at * 1000 < 10 * 60e3) toast(`${ctrl.n || 'Игрок'} хочет добавить вас в друзья`);
+        if (Date.now() - ev.created_at * 1000 < 10 * 60e3) toast('хочет добавить вас в друзья', false, { title: ctrl.n || 'Игрок', avatar: { name: ctrl.n, key: other } });
         saveSoon();
         subscribeFriends();
       }
@@ -178,7 +178,7 @@ async function onDM(ev) {
     } else if (ctrl.t === 'fa') {
       if (!mine && a.outgoing.includes(other)) {
         addFriend(other, ctrl.n, false);
-        if (Date.now() - ev.created_at * 1000 < 10 * 60e3) toast(`${ctrl.n || 'Игрок'} принял(а) заявку в друзья`);
+        if (Date.now() - ev.created_at * 1000 < 10 * 60e3) toast('теперь у вас в друзьях', false, { title: ctrl.n || 'Игрок', avatar: { name: ctrl.n, key: other } });
       } else if (mine && !isFriend(other)) addFriend(other, a.requests.find((r) => r.pk === other)?.name, false);
     } else if (ctrl.t === 'rm' && !mine && isFriend(other)) {
       removeFriend(other, false);
@@ -197,7 +197,7 @@ async function onDM(ev) {
   if (viewing) markRead(other);
   else if (!mine && Date.now() - ev.created_at * 1000 < 5 * 60e3) {
     sfx.ok();
-    toast(`${nameOf(other)}: ${text.slice(0, 120)}`);
+    toast(text.slice(0, 160), false, { title: nameOf(other), avatar: { name: nameOf(other), key: other } });
   }
   updateDot();
   renderSocialSoon();

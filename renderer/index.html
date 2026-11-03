@@ -21,6 +21,7 @@
       <button class="tab focusable" data-zone="tabs" data-tab="activity">Активность</button>
     </nav>
     <div class="status">
+      <div class="playing hidden" id="playing"><i></i><span></span></div>
       <div class="np hidden" id="np"><div class="eq"><i></i><i></i><i></i><i></i></div><span></span></div>
       <button class="icon-btn focusable" data-zone="tabs" data-action="search" title="Поиск">
         <svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
@@ -64,7 +65,8 @@
   <div class="social profile hidden" id="profile"></div>
   <div class="cc hidden" id="cc"></div>
   <div class="osk hidden" id="osk"></div>
-  <div class="toast hidden" id="toast"></div>
+  <div class="mixer hidden" id="mixer"></div>
+  <div class="toasts" id="toasts"></div>
 
   <script src="vendor/hls.min.js"></script>
   <script src="vendor/nostr.bundle.js"></script>

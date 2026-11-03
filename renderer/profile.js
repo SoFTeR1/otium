@@ -242,7 +242,7 @@ function noteTrophy(game, appid, items, announce) {
   publishLibrarySoon();
   if (announce) {
     sfx.launch();
-    toast(`🏆 Трофей получен: ${newest.name} — ${game}`);
+    toast(`${newest.name} — ${game}`, false, newest.icon ? { title: 'Трофей получен', img: newest.icon, ms: 7000 } : { title: 'Трофей получен', icon: '🏆', ms: 7000 });
   }
 }
 

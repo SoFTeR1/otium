@@ -1,8 +1,8 @@
 {
   "name": "ps5-launcher",
   "productName": "PS5 Launcher",
-  "version": "1.4.0",
-  "description": "PS5-style game launcher for Windows",
+  "version": "1.5.0",
+  "description": "PS5 Launcher",
   "author": "SoFTeR1",
   "repository": "github:SoFTeR1/ps5-launcher",
   "main": "main.js",
@@ -58,6 +58,7 @@
       "system.js",
       "gamepad.js",
       "discord.js",
+      "audio.js",
       "renderer/**/*"
     ]
   },

@@ -141,12 +141,15 @@ function openCC() {
   cc.open = true;
   cc.idx = 0;
   renderCC();
+  document.body.classList.add('cc-open');
   $('#cc').classList.remove('hidden');
   requestAnimationFrame(() => $('#cc').classList.add('show'));
   sfx.ok();
 }
 
 function closeCC() {
+  closeMixer();
+  document.body.classList.remove('cc-open');
   cc.open = false;
   $('#cc').classList.remove('show');
   setTimeout(() => !cc.open && $('#cc').classList.add('hidden'), 300);
@@ -172,6 +175,7 @@ function renderCC() {
   }
   const unread = typeof socialUnread === 'function' ? socialUnread() : 0;
   items.push({ cls: 'chat', html: `${CC_ICONS.chat}<div class="d">Друзья${unread ? ` · <b class="badge">${unread}</b>` : ''}</div>`, ok: () => { closeCC(); openSocial(); } });
+  items.push({ cls: 'vol', html: `${CC_ICONS.vol}<div class="d">Звук</div>`, ok: openMixer });
   items.push({ cls: 'set', html: `${CC_ICONS.settings}<div class="d">Настройки</div>`, ok: () => { closeCC(); openSettings(); } });
   items.push({ cls: 'set', html: `${CC_ICONS.power}<div class="d">Питание</div>`, ok: () => { closeCC(); openPower(); } });
   cc.items = items;
@@ -186,7 +190,97 @@ function focusCC() {
   $$('#cc .cci').forEach((el, i) => el.classList.toggle('focus', i === cc.idx));
 }
 
+// ---------- Volume mixer (per-app volume, like the Windows mixer) ----------
+const mixer = { open: false, idx: 0, rows: [] };
+
+async function openMixer() {
+  mixer.open = true;
+  mixer.idx = 0;
+  $('#mixer').innerHTML = '<div class="mx-head">Звук</div><div class="mx-empty">Загружаем приложения…</div>';
+  $('#mixer').classList.remove('hidden');
+  requestAnimationFrame(() => $('#mixer').classList.add('show'));
+  loadMixer(await ipc.audio('list'));
+}
+function closeMixer() {
+  if (!mixer.open) return;
+  mixer.open = false;
+  $('#mixer').classList.remove('show');
+  setTimeout(() => !mixer.open && $('#mixer').classList.add('hidden'), 250);
+}
+
+function loadMixer(d) {
+  if (!mixer.open) return;
+  if (!d || d.error) {
+    $('#mixer').innerHTML = '<div class="mx-head">Звук</div><div class="mx-empty">Не удалось получить громкость приложений</div>';
+    return;
+  }
+  // one row per app even if it runs several audio processes (Chrome, Discord…)
+  const byApp = new Map();
+  for (const a of d.apps) {
+    const k = (a.path || a.name).toLowerCase();
+    const cur = byApp.get(k);
+    if (cur) cur.pids.push(a.pid);
+    else byApp.set(k, { ...a, pids: [a.pid] });
+  }
+  mixer.rows = [
+    { master: true, name: 'Общая громкость', volume: d.master, muted: d.masterMuted },
+    ...[...byApp.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  ];
+  mixer.idx = Math.min(mixer.idx, mixer.rows.length - 1);
+  renderMixer();
+  mixer.rows.forEach(async (r, i) => {
+    if (!r.path || r.icon) return;
+    r.icon = await ipc.appIcon(r.path);
+    const img = $(`#mixer .mx-row[data-i="${i}"] .mx-ic`);
+    if (img && r.icon) img.style.backgroundImage = `url('${r.icon}')`;
+  });
+}
+
+function renderMixer() {
+  $('#mixer').innerHTML = `<div class="mx-head">Звук <span>${oskHint('ok', 'выкл. звук')} ◀ ▶ громкость</span></div>` + mixer.rows.map((r, i) => `
+    <div class="mx-row ${i === mixer.idx ? 'focus' : ''} ${r.muted ? 'muted' : ''} ${r.master ? 'master' : ''}" data-i="${i}">
+      <div class="mx-ic" ${r.icon ? `style="background-image:url('${r.icon}')"` : ''}>${r.master ? CC_ICONS.vol : r.icon ? '' : esc(r.name[0])}</div>
+      <div class="mx-body"><div class="mx-name">${esc(r.name)}</div>
+        <div class="mx-bar"><i style="width:${r.muted ? 0 : r.volume}%"></i></div></div>
+      <div class="mx-val">${r.muted ? CC_ICONS.mute : r.volume}</div>
+    </div>`).join('');
+  $$('#mixer .mx-row').forEach((el) => {
+    const i = +el.dataset.i;
+    el.onclick = (e) => {
+      mixer.idx = i;
+      const bar = $('.mx-bar', el).getBoundingClientRect();
+      if (e.clientX >= bar.left && e.clientX <= bar.right) setVolume(mixer.rows[i], Math.round(((e.clientX - bar.left) / bar.width) * 100));
+      else renderMixer();
+    };
+  });
+}
+
+async function setVolume(r, v) {
+  r.volume = Math.max(0, Math.min(100, v));
+  if (r.muted && v > 0) await toggleMute(r);
+  renderMixer();
+  if (r.master) ipc.audio(`master ${r.volume}`);
+  else for (const pid of r.pids) ipc.audio(`set ${pid} ${r.volume}`);
+}
+async function toggleMute(r) {
+  r.muted = !r.muted;
+  renderMixer();
+  if (r.master) await ipc.audio(`mastermute ${r.muted ? 1 : 0}`);
+  else for (const pid of r.pids) await ipc.audio(`mute ${pid} ${r.muted ? 1 : 0}`);
+}
+
+function mixerHandle(act) {
+  const r = mixer.rows[mixer.idx];
+  if (act === 'back') { sfx.back(); return closeMixer(); }
+  if (act === 'up' && mixer.idx > 0) { mixer.idx--; sfx.move(); renderMixer(); }
+  else if (act === 'down' && mixer.idx < mixer.rows.length - 1) { mixer.idx++; sfx.move(); renderMixer(); }
+  else if ((act === 'left' || act === 'right') && r) { setVolume(r, r.volume + (act === 'right' ? 5 : -5)); tone(act === 'right' ? 900 : 700, 0.03, 0.02); }
+  else if (act === 'ok' && r) { sfx.ok(); toggleMute(r); }
+  $('#mixer .mx-row.focus')?.scrollIntoView({ block: 'nearest' });
+}
+
 function ccHandle(act) {
+  if (mixer.open) return mixerHandle(act);
   if (act === 'left' && cc.idx > 0) { cc.idx--; sfx.move(); focusCC(); }
   else if (act === 'right' && cc.idx < cc.items.length - 1) { cc.idx++; sfx.move(); focusCC(); }
   else if (act === 'ok') { sfx.ok(); cc.items[cc.idx]?.ok(); }
@@ -194,6 +288,8 @@ function ccHandle(act) {
 }
 
 const CC_ICONS = {
+  vol: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
+  mute: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4z"/></svg>',
   power: '<svg class="ci" viewBox="0 0 24 24"><path d="M11 2h2v10h-2zm6.4 3.2 1.4 1.4A8 8 0 1 1 5.2 6.6l1.4-1.4A6 6 0 1 0 17.4 5.2z"/></svg>',
   back: '<svg class="ci" viewBox="0 0 24 24"><path d="M10 6 4 12l6 6v-4h6a4 4 0 0 0 4-4V6h-2v4a2 2 0 0 1-2 2h-6V6z"/></svg>',
   home: '<svg class="ci" viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3z"/></svg>',

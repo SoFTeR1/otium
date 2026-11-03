@@ -7,6 +7,7 @@ const steam = require('./steam');
 const system = require('./system');
 const gamepad = require('./gamepad');
 const discord = require('./discord');
+const audio = require('./audio');
 
 let autoUpdater = null;
 try {
@@ -33,6 +34,8 @@ let win;
 let hiddenForGame = false;
 let pad = null;        // background gamepad watcher
 let gameHwnd = null;   // window that was in front when the Guide button summoned us
+let ownHwnd = null;
+let coverTimer = null; // keeps us topmost while a game is starting
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => restoreWindow());
@@ -92,11 +95,24 @@ function restoreWindow() {
   win.focus();
 }
 
+// Windows won't let a background app take focus on its own; briefly going topmost and letting the
+// gamepad helper (which can) activate our window gets us reliably in front of everything
+function forceFront(holdMs = 1500) {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.show();
+  win.moveTop();
+  win.focus();
+  if (ownHwnd) pad?.focus(ownHwnd);
+  if (holdMs) setTimeout(() => { if (!coverTimer) win.setAlwaysOnTop(false); }, holdMs);
+}
+
 function gameEnded() {
   gameHwnd = null;
   if (!hiddenForGame) return;
   hiddenForGame = false;
-  restoreWindow();
+  forceFront();
 }
 
 // Split an argument string, respecting double quotes
@@ -121,9 +137,10 @@ const FILTERS = {
     { name: 'Все файлы', extensions: ['*'] }
   ]
 };
-ipcMain.handle('dlg:open', async (_e, kind) => {
-  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: FILTERS[kind] || FILTERS.exe });
-  return r.canceled ? null : r.filePaths[0];
+ipcMain.handle('dlg:open', async (_e, kind, multi) => {
+  const r = await dialog.showOpenDialog(win, { properties: multi ? ['openFile', 'multiSelections'] : ['openFile'], filters: FILTERS[kind] || FILTERS.exe });
+  if (r.canceled) return null;
+  return multi ? r.filePaths : r.filePaths[0];
 });
 
 ipcMain.handle('media:import', (_e, src) => {
@@ -149,18 +166,23 @@ ipcMain.handle('exe:icon', async (_e, exe) => {
 // ---------- Launching ----------
 // While a game is starting the launcher sits above every window (Steam's "launching…" dialog included);
 // once the game is up we step aside, and come back when it exits.
+// While a game is starting, keep re-asserting topmost: Steam's dialogs and some game launchers make
+// themselves topmost too, and the last one to do so wins
 ipcMain.handle('win:cover', (_e, on) => {
   if (!win) return;
+  clearInterval(coverTimer);
+  coverTimer = null;
   if (on) {
-    win.setAlwaysOnTop(true, 'screen-saver');
-    win.moveTop();
-    win.focus();
+    forceFront(0);
+    coverTimer = setInterval(() => { win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); }, 600);
   } else {
     win.setAlwaysOnTop(false);
   }
 });
 ipcMain.handle('win:stepAside', () => {
   if (!win) return;
+  clearInterval(coverTimer);
+  coverTimer = null;
   win.setAlwaysOnTop(false);
   hiddenForGame = true;
   win.minimize();
@@ -168,6 +190,8 @@ ipcMain.handle('win:stepAside', () => {
 // "Back to game": minimising alone lets Windows pick any window, so explicitly re-activate the game's window
 ipcMain.handle('win:returnToGame', () => {
   if (!win) return;
+  clearInterval(coverTimer);
+  coverTimer = null;
   win.setAlwaysOnTop(false);
   hiddenForGame = true;
   win.minimize();
@@ -223,6 +247,15 @@ ipcMain.handle('steam:playerGames', (_e, { key, steamId }) => steam.playerGames(
 ipcMain.handle('steam:achievementsFresh', (_e, { appid, key, steamId }) => {
   steam.clearCache(`ach${String(appid).replace(/\D/g, '')}:`);
   return steam.achievements(String(appid).replace(/\D/g, ''), key, steamId).catch(() => ({ error: 'error' }));
+});
+
+// ---------- Volume mixer ----------
+ipcMain.handle('audio:cmd', (_e, cmd) => audio.command(cmd));
+const iconCache = new Map();
+ipcMain.handle('audio:icon', async (_e, p) => {
+  if (!p) return null;
+  if (!iconCache.has(p)) iconCache.set(p, await app.getFileIcon(p, { size: 'normal' }).then((i) => i.toDataURL()).catch(() => null));
+  return iconCache.get(p);
 });
 
 // ---------- Discord / power ----------
@@ -295,6 +328,7 @@ app.whenReady().then(() => {
   createWindow();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
+  ownHwnd = hwnd;
   pad = gamepad.watch(hwnd, (ev) => {
     if (ev.startsWith('front')) {
       // the window that was in front when Guide was pressed — normally the game
@@ -311,4 +345,4 @@ app.whenReady().then(() => {
   });
 });
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => system.shutdown());
+app.on('will-quit', () => { system.shutdown(); audio.shutdown(); });

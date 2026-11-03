@@ -102,13 +102,26 @@ function isFilePath(p) {
 function save() {
   return ipc.save(data).catch((e) => toast('Не удалось сохранить настройки: ' + (e?.message || e), true));
 }
-let toastTimer;
-function toast(msg, err = false) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.className = 'toast' + (err ? ' err' : '');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), 3500);
+// Steam-style notification cards, bottom-left, up to three stacked.
+// opts: { title, img (picture url), icon (emoji/text), avatar: { name, key } }
+function toast(msg, err = false, opts = {}) {
+  const box = $('#toasts');
+  const el = document.createElement('div');
+  el.className = 'note' + (err ? ' err' : '');
+  let pic;
+  if (opts.img) pic = `<div class="note-pic" style="background-image:${esc(cssUrl(opts.img))}"></div>`;
+  else if (opts.avatar) {
+    const h = hue(opts.avatar.key || opts.avatar.name);
+    pic = `<div class="note-pic letter" style="background:linear-gradient(135deg,hsl(${h} 65% 45%),hsl(${(h + 60) % 360} 65% 30%))">${esc((opts.avatar.name || '?')[0].toUpperCase())}</div>`;
+  } else pic = opts.icon ? `<div class="note-pic emoji">${esc(opts.icon)}</div>` : '<div class="note-pic" style="background-image:url(icon.png)"></div>';
+  el.innerHTML = `${pic}<div class="note-body"><div class="note-title">${esc(opts.title || (err ? 'Ошибка' : 'PS5 Launcher'))}</div><div class="note-text">${esc(msg)}</div></div>`;
+  box.appendChild(el);
+  while (box.children.length > 3) box.firstElementChild.remove();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 450);
+  }, opts.ms || (err ? 6000 : 5000));
 }
 
 // ---------- Background ----------
@@ -154,10 +167,70 @@ function bgCandidates(g) {
   const out = [];
   if (g?.background) out.push({ url: g.background });
   if (g?.hero && s.bgMode !== 'global') out.push({ url: g.hero });
-  if (s.wallpaper) out.push({ url: s.wallpaper });
+  const wall = currentWallpaper();
+  if (wall) out.push({ url: wall });
   if (g?.cover) out.push({ url: g.cover, blur: true });
   return out.filter((c) => !bgFailed.has(c.url));
 }
+// ---------- Shared wallpapers: several, shown as a random slideshow ----------
+const SLIDE_NAMES = { 0: 'Выкл', 30: 'каждые 30 сек', 60: 'каждую минуту', 300: 'каждые 5 мин', 900: 'каждые 15 мин' };
+let slideIdx = 0;
+let slideAt = Date.now();
+function currentWallpaper() {
+  const w = data.settings.wallpapers || [];
+  return w.length ? w[slideIdx % w.length] : '';
+}
+setInterval(() => {
+  const s = data.settings;
+  const w = s.wallpapers || [];
+  if (!s.slideshow || w.length < 2 || document.hidden || Date.now() - slideAt < s.slideshow * 1000) return;
+  const prev = currentWallpaper();
+  let next = slideIdx;
+  while (next === slideIdx) next = Math.floor(Math.random() * w.length);
+  slideIdx = next;
+  slideAt = Date.now();
+  // only swap if the wallpaper is what's on screen right now (not a game's own art)
+  if ((bgCurrent && bgCurrent.startsWith(prev)) || videoUrl === prev) applyBackground(list[sel]);
+}, 1000);
+
+function openWallpapers(focus = 0) {
+  const s = data.settings;
+  const w = (s.wallpapers ||= []);
+  openModal(`<h2>Общие фоны</h2>
+    <div class="meta" style="margin-bottom:14px"><span>${w.length > 1 ? `Фоны меняются в случайном порядке: ${SLIDE_NAMES[s.slideshow || 0].toLowerCase()}. Нажмите на фон, чтобы убрать его.` : 'Добавьте несколько картинок или видео — их можно показывать слайдшоу.'}</span></div>
+    <div class="wp-grid">${w.map((u, i) => `<button class="wp focusable" data-i="${i}" ${isVideo(u) ? '' : `style="background-image:${esc(cssUrl(u))}"`}>${isVideo(u) ? '🎬' : ''}<b>✕</b></button>`).join('')}
+      <button class="wp add focusable" id="wpAdd">+<span>Добавить</span></button></div>
+    <div class="buttons"><button class="btn focusable" id="wpSlide">Смена: ${SLIDE_NAMES[s.slideshow || 0]}</button><button class="btn primary focusable" id="wpDone">Готово</button></div>`,
+  { onBack: () => openSettings(5), focus });
+  $$('#modal .wp[data-i]').forEach((b) => (b.onclick = async () => {
+    w.splice(+b.dataset.i, 1);
+    slideIdx = 0;
+    await save();
+    update(true);
+    openWallpapers(Math.max(0, +b.dataset.i - 1));
+  }));
+  $('#wpAdd').onclick = async () => {
+    const files = await ipc.openFile('background', true);
+    if (!files?.length) return;
+    for (const f of files) {
+      const u = await ipc.importMedia(f);
+      bgFailed.delete(u);
+      w.push(u);
+    }
+    if (!s.slideshow && w.length > 1) s.slideshow = 60;
+    await save();
+    update(true);
+    openWallpapers(w.length);
+  };
+  $('#wpSlide').onclick = async () => {
+    const steps = [0, 30, 60, 300, 900];
+    s.slideshow = steps[(steps.indexOf(s.slideshow || 0) + 1) % steps.length];
+    await save();
+    openWallpapers(w.length + 1);
+  };
+  $('#wpDone').onclick = () => openSettings(5);
+}
+
 function applyBackground(g) {
   const all = bgCandidates(g);
   const top = all[0];
@@ -365,6 +438,11 @@ function update(force) {
   if (actFocus >= actEls.length) actFocus = 0;
   [$('#btnPlay'), $('#btnMore')].forEach((b) => b.classList.toggle('focus', zone === 'actions' && b === actEls[actFocus]));
   feedUpdateFocus();
+
+  // "Играет в …" chip in the top bar while a game runs
+  const playing = data.games.find((x) => running.has(x.id));
+  $('#playing').classList.toggle('hidden', !playing);
+  if (playing) $('#playing span').textContent = `Играет в ${playing.name}`;
 
   // info panel
   const key = g ? [g.id, lastPlayedOf(g), totalPlaytime(g), g.name, g.logo, running.has(g.id)].join(':') : 'add:' + tab;
@@ -861,8 +939,8 @@ function openSettings(focus = 0) {
     ['discord', 'Статус в Discord «Играет в…»', onoff(!!s.discordId)],
     ['sort', 'Порядок игр', SORT_NAMES[s.sortMode || 'recent']],
     ['sep'],
-    ['wallpaper', 'Общий фон (картинка или видео)', s.wallpaper ? 'Свой' : 'Стандартный'],
-    ...(s.wallpaper ? [['wallpaperReset', 'Сбросить общий фон', '']] : []),
+    ['wallpaper', 'Общие фоны (картинки или видео)', s.wallpapers?.length ? `${s.wallpapers.length} шт.` : 'Стандартный'],
+    ['slideshow', 'Смена общего фона', SLIDE_NAMES[s.slideshow || 0]],
     ['bgMode', 'Фон на играх', s.bgMode === 'global' ? 'Общий фон' : 'Арт игры'],
     ['trailers', 'Живые фоны (трейлеры игр)', onoff(s.liveTrailers)],
     ['sep'],
@@ -912,16 +990,12 @@ function openSettings(focus = 0) {
       update(true);
       return openSettings(i);
     }
-    if (id === 'wallpaper' || id === 'wallpaperReset') {
-      if (id === 'wallpaper') {
-        const p = await ipc.openFile('background');
-        if (!p) return;
-        s.wallpaper = await ipc.importMedia(p);
-        bgFailed.delete(s.wallpaper);
-      } else s.wallpaper = '';
+    if (id === 'wallpaper') return openWallpapers();
+    if (id === 'slideshow') {
+      const steps = [0, 30, 60, 300, 900];
+      s.slideshow = steps[(steps.indexOf(s.slideshow || 0) + 1) % steps.length];
       await save();
-      update(true);
-      return openSettings(id === 'wallpaper' ? i : i - 1);
+      return openSettings(i);
     }
     if (id === 'bgMode') {
       s.bgMode = s.bgMode === 'global' ? 'game' : 'global';
@@ -1232,6 +1306,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   data = await ipc.load();
   data.sessions ||= [];
+  // single shared wallpaper → list of wallpapers (slideshow)
+  if (data.settings.wallpaper && !data.settings.wallpapers) data.settings.wallpapers = [data.settings.wallpaper];
   // older versions stored a user-picked background in `hero`; Steam art keeps using `hero`
   for (const g of data.games) {
     if (g.hero && !steamIdOf(g) && !g.background) { g.background = g.hero; delete g.hero; }
