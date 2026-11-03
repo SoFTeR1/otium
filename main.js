@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const steam = require('./steam');
 const system = require('./system');
+const gamepad = require('./gamepad');
 
 let autoUpdater = null;
 try {
@@ -34,7 +35,7 @@ app.on('second-instance', () => restoreWindow());
 function loadData() {
   try {
     const d = JSON.parse(fs.readFileSync(DB_FILE, 'utf8').replace(/^﻿/, ''));
-    return { games: d.games || [], sessions: d.sessions || [], settings: { ...DEFAULT_DATA.settings, ...(d.settings || {}) } };
+    return { ...d, games: d.games || [], sessions: d.sessions || [], settings: { ...DEFAULT_DATA.settings, ...(d.settings || {}) } };
   } catch {
     return structuredClone(DEFAULT_DATA);
   }
@@ -201,7 +202,8 @@ ipcMain.handle('steam:trailer', (_e, appid) => steam.trailer(String(appid).repla
 ipcMain.handle('steam:sales', (_e, steamId) => steam.sales(steamId).catch(() => null));
 ipcMain.handle('steam:achievements', (_e, { appid, key, steamId }) =>
   steam.achievements(String(appid).replace(/\D/g, ''), key, steamId).catch(() => ({ error: 'error' })));
-ipcMain.handle('steam:friends', (_e, { key, steamId }) => steam.friends(key, steamId).catch(() => null));
+ipcMain.handle('steam:friends', (_e, { key, steamId }) => steam.friends(key, steamId).catch(() => ({ error: 'network' })));
+ipcMain.handle('steam:check', (_e, { key, steamId }) => steam.checkAccount(key, steamId).catch(() => ({ error: 'network' })));
 
 // ---------- System ----------
 ipcMain.handle('sys:stats', () => system.stats());
@@ -256,6 +258,15 @@ ipcMain.handle('upd:install', () => autoUpdater.quitAndInstall(true, true));
 
 app.whenReady().then(() => {
   createWindow();
+  // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
+  const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
+  const stopPad = gamepad.watch(hwnd, (ev) => {
+    if (ev === 'front') {
+      restoreWindow();
+      send('pad:guide', { from: 'background' });
+    } else if (ev === 'toggle') send('pad:guide', { from: 'front' });
+  });
+  app.on('will-quit', stopPad);
   steam.watchRunning((id, prev) => {
     send('steam:running', { id, prev, at: Date.now() });
     if (!id && prev) gameEnded();

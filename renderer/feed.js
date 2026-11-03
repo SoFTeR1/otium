@@ -92,7 +92,12 @@ function feedUpdateFocus() {
     shift = $('#feed').offsetTop + secEl.offsetTop - innerHeight * 0.15;
   }
   $('main').style.transform = shift > 0 ? `translateY(${-shift}px)` : '';
+  $('main').classList.toggle('scrolled', shift > 0);
+  $('#hints').classList.toggle('away', shift > 0);
   $('.topbar').classList.toggle('scrolled', shift > 0);
+  // sections above the focused one fade out instead of sliding under the top bar
+  const curIdx = cur ? FEED.findIndex((s) => s.key === cur.key) : -1;
+  FEED.forEach((s, i) => $(`.fsec[data-key="${s.key}"]`)?.classList.toggle('above', shift > 0 && i < curIdx));
 }
 
 function feedEnter() {
@@ -179,19 +184,31 @@ const keyCard = (text) => ({
   ok: openSteamAccount
 });
 
+// A card explaining why Steam data is missing, instead of silently hiding the section
+function steamErrorCard(error, what) {
+  const privacy = () => ipc.openUrl('https://steamcommunity.com/my/edit/settings');
+  const c = {
+    badkey: ['🔑', 'Steam не принял API-ключ', 'Проверьте ключ в Настройках → Аккаунт Steam', openSteamAccount],
+    private: ['🔒', what === 'friends' ? 'Список друзей Steam скрыт' : 'Сведения об играх скрыты',
+      what === 'friends' ? 'Откройте «Список друзей» в настройках приватности Steam' : 'Откройте «Сведения об играх» в настройках приватности Steam', privacy],
+    network: ['📡', 'Нет связи со Steam', 'Попробуем ещё раз позже', null],
+    error: ['⚠️', 'Steam вернул ошибку', 'Проверьте аккаунт в Настройках → Аккаунт Steam', openSteamAccount]
+  }[error] || null;
+  if (!c) return null;
+  return {
+    cls: 'wide prompt',
+    html: `<div class="pr-ic">${c[0]}</div><div><div class="t">${c[1]}</div><div class="d">${c[2]}</div></div>`,
+    ok: c[3]
+  };
+}
+
 async function loadTrophies(g, sid, key) {
   if (!apiKey()) return setSection('trophies', [keyCard('Трофеи и друзья Steam')]);
   if (!steamUser()) return;
   const r = await ipc.achievements({ appid: sid, key: apiKey(), steamId: steamUser() });
   if (feedGame !== key || !r) return;
-  if (r.error === 'private') {
-    return setSection('trophies', [{
-      cls: 'wide prompt',
-      html: `<div class="pr-ic">🔒</div><div><div class="t">Профиль Steam скрыт</div><div class="d">Откройте «Сведения об играх» в настройках приватности Steam</div></div>`,
-      ok: () => ipc.openUrl('https://steamcommunity.com/my/edit/settings')
-    }]);
-  }
-  if (r.error || !r.total) return setSection('trophies', []);
+  if (r.error === 'none' || (!r.error && !r.total)) return setSection('trophies', []);
+  if (r.error) return setSection('trophies', [steamErrorCard(r.error, 'trophies') || steamErrorCard('error')]);
 
   const pct = Math.round((100 * r.done) / r.total);
   const C = 2 * Math.PI * 34;
@@ -310,8 +327,14 @@ function refreshStats() {
 
 async function refreshFriends() {
   if (!apiKey() || !steamUser()) return setSection('friends', []);
-  const list = await ipc.friends({ key: apiKey(), steamId: steamUser() });
-  if (!list) return;
+  const r = await ipc.friends({ key: apiKey(), steamId: steamUser() });
+  if (!r) return;
+  if (r.error) {
+    // keep showing the last good list on a network hiccup
+    if (r.error === 'network' && feed.cards.friends?.length) return;
+    return setSection('friends', [steamErrorCard(r.error, 'friends')].filter(Boolean), { title: 'Друзья Steam' });
+  }
+  const list = r.list;
   const online = list.filter((f) => f.state > 0 || f.game).sort((a, b) => !!b.game - !!a.game || (a.state === 1 ? -1 : 1) - (b.state === 1 ? -1 : 1));
   const offline = list.length - online.length;
   const status = (f) => f.game ? `<span class="st game">${esc(f.game)}</span>` : f.state === 1 ? '<span class="st on">В сети</span>' : '<span class="st away">Нет на месте</span>';
@@ -369,6 +392,7 @@ const ICONS = {
   pause: '<svg class="ci" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>'
 };
 let music = { key: '', art: null };
+let currentMusic = null;
 const APP_NAMES = [[/spotify/i, 'Spotify'], [/yandex/i, 'Яндекс Музыка'], [/chrome/i, 'Chrome'], [/msedge|edge/i, 'Edge'], [/firefox/i, 'Firefox'], [/vk/i, 'VK Музыка'], [/zune|groove|media/i, 'Медиаплеер']];
 function appName(id) {
   return APP_NAMES.find(([re]) => re.test(id || ''))?.[1] || (id || '').split(/[\\!.]/).filter(Boolean).pop() || 'Плеер';
@@ -381,6 +405,7 @@ async function pollMusic() {
   showMusic(await ipc.media('poll'));
 }
 function showMusic(m) {
+  currentMusic = m;
   const np = $('#np');
   if (!m || !m.title) {
     np.classList.add('hidden');
@@ -417,10 +442,27 @@ function openSteamAccount() {
       <div class="hint">На странице ключа в поле «Domain» можно написать что угодно, например localhost</div></div>
     <div class="field"><label>SteamID64</label><input class="focusable" id="fSid" placeholder="${esc(steamLocal.steamId || 'определяется автоматически')}" value="${esc(data.settings.steamId || '')}"/>
       <div class="hint">Оставьте пустым — возьмём аккаунт, который последним входил в Steam${steamLocal.steamId ? ` (${esc(steamLocal.steamId)})` : ''}</div></div>
-    <div class="buttons"><button class="btn focusable" id="bNo">Отмена</button><button class="btn primary focusable" id="bOk">Сохранить</button></div>`,
+    <div class="acc-check" id="accCheck"></div>
+    <div class="buttons"><button class="btn focusable" id="bNo">Отмена</button><button class="btn focusable" id="bCheck">Проверить</button><button class="btn primary focusable" id="bOk">Сохранить</button></div>`,
   { focus: 0 });
   $('#bGet').onclick = () => ipc.openUrl('https://steamcommunity.com/dev/apikey');
   $('#bNo').onclick = closeModal;
+  $('#bCheck').onclick = async () => {
+    const box = $('#accCheck');
+    box.innerHTML = '<span class="d">Проверяем…</span>';
+    const key = $('#fKey').value.trim();
+    const sid = $('#fSid').value.trim().replace(/\D/g, '') || steamLocal.steamId || '';
+    const r = await ipc.steamCheck({ key, steamId: sid });
+    const msg = {
+      nokey: 'Введите ключ', badkey: 'Steam не принял ключ — скопируйте его заново со страницы ключа',
+      noprofile: `Профиль ${sid} не найден — проверьте SteamID64`, network: 'Нет связи со Steam'
+    }[r?.error];
+    box.innerHTML = msg ? `<span class="bad">✕ ${esc(msg)}</span>` : `
+      <div class="av" style="background-image:${esc(cssUrl(r.avatar))}"></div>
+      <div><div class="t">${esc(r.name)}</div>
+      <div class="${r.public ? 'good' : 'bad'}">${r.public ? '✓ Профиль открыт — трофеи будут видны' : '✕ Профиль скрыт — трофеи недоступны'}</div>
+      <div class="${r.friendsVisible ? 'good' : 'bad'}">${r.friendsVisible ? '✓ Список друзей доступен' : '✕ Список друзей скрыт'}</div></div>`;
+  };
   $('#bOk').onclick = async () => {
     data.settings.steamApiKey = $('#fKey').value.trim();
     data.settings.steamId = $('#fSid').value.trim().replace(/\D/g, '');

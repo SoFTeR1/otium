@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' file: data: https:; media-src 'self' file: https: blob:; connect-src 'self' https:; style-src 'self' 'unsafe-inline'" />
+        content="default-src 'self'; img-src 'self' file: data: https:; media-src 'self' file: https: blob:; connect-src 'self' https: wss:; style-src 'self' 'unsafe-inline'" />
   <title>PS5 Launcher</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -24,6 +24,10 @@
       <div class="np hidden" id="np"><div class="eq"><i></i><i></i><i></i><i></i></div><span></span></div>
       <button class="icon-btn focusable" data-zone="tabs" data-action="search" title="Поиск">
         <svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
+      </button>
+      <button class="icon-btn focusable" data-zone="tabs" data-action="friends" title="Друзья и сообщения">
+        <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-7 1.7-7 4v3h14v-3c0-2.3-3.7-4-7-4zm7.5-2a3.5 3.5 0 1 0-1.3-6.8A5.9 5.9 0 0 1 16 7a6 6 0 0 1-.8 3.8c.4.1.9.2 1.3.2zm1.5 2.2c1.3.9 2 2.1 2 3.8v3h3v-3c0-1.9-2.4-3.3-5-3.8z"/></svg>
+        <b class="dot hidden" id="friendsDot"></b>
       </button>
       <button class="icon-btn focusable" data-zone="tabs" data-action="settings" title="Настройки">
         <svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
@@ -56,10 +60,16 @@
     <div class="modal" id="modal"></div>
   </div>
 
+  <div class="social hidden" id="social"></div>
+  <div class="cc hidden" id="cc"></div>
+  <div class="osk hidden" id="osk"></div>
   <div class="toast hidden" id="toast"></div>
 
   <script src="vendor/hls.min.js"></script>
+  <script src="vendor/nostr.bundle.js"></script>
   <script src="app.js"></script>
   <script src="feed.js"></script>
+  <script src="overlays.js"></script>
+  <script src="social.js"></script>
 </body>
 </html>

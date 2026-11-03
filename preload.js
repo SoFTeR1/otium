@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   cover: (on) => ipcRenderer.invoke('win:cover', on),
   stepAside: () => ipcRenderer.invoke('win:stepAside'),
   onGameExited: on('game:exited'),
+  onGuide: on('pad:guide'),
 
   scanSteam: () => ipcRenderer.invoke('steam:scan'),
   steamLocal: () => ipcRenderer.invoke('steam:local'),
@@ -23,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   sales: (steamId) => ipcRenderer.invoke('steam:sales', steamId),
   achievements: (q) => ipcRenderer.invoke('steam:achievements', q),
   friends: (q) => ipcRenderer.invoke('steam:friends', q),
+  steamCheck: (q) => ipcRenderer.invoke('steam:check', q),
 
   sysStats: () => ipcRenderer.invoke('sys:stats'),
   media: (cmd) => ipcRenderer.invoke('media:cmd', cmd),

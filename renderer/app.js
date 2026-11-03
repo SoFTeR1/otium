@@ -100,7 +100,7 @@ function isFilePath(p) {
   return /^[a-z]:[\\/]/i.test(p || '') || /^\\\\/.test(p || '');
 }
 function save() {
-  return ipc.save(data);
+  return ipc.save(data).catch((e) => toast('Не удалось сохранить настройки: ' + (e?.message || e), true));
 }
 let toastTimer;
 function toast(msg, err = false) {
@@ -274,7 +274,7 @@ function update(force) {
   // focus rings
   $('#row').classList.toggle('focused', zone === 'row');
   $$('.tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  const tabEls = [...$$('.tabs .tab'), $('[data-action="search"]'), $('[data-action="settings"]')];
+  const tabEls = [...$$('.tabs .tab'), $('[data-action="search"]'), $('[data-action="friends"]'), $('[data-action="settings"]')];
   tabEls.forEach((t, i) => t.classList.toggle('focus', zone === 'tabs' && i === tabFocus));
   const g = list[sel];
   const actEls = g ? [$('#btnPlay'), $('#btnMore')] : [$('#btnPlay')];
@@ -422,6 +422,7 @@ async function launch(g) {
 
 async function finishLaunch(g, ov, stepAside) {
   launching = null;
+  publishPresence();
   // rebuild the row underneath the overlay so the reorder is never visible
   zone = 'row';
   render(g.id);
@@ -553,7 +554,8 @@ function modalHandle(act, src) {
   if (act === 'ok' && el) {
     if (el.tagName === 'INPUT') {
       if (src === 'key') setModalFocus(modal.idx + 1);
-      else el.focus();
+      // from the couch: type with the on-screen keyboard
+      else openOSK(el, { onDone: () => setModalFocus(modal.idx + 1) });
       return;
     }
     sfx.ok();
@@ -930,7 +932,11 @@ function handle(act, src) {
     if (act === 'back' && launching) { sfx.back(); launching.cancel(); }
     return;
   }
+  if (osk.open) return oskHandle(act);
+  if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);
+  if (cc.open) return ccHandle(act);
+  if (socialOpen()) return socialHandle(act, src);
   const count = list.length + 1;
   const prevZone = zone;
 
@@ -945,12 +951,13 @@ function handle(act, src) {
     else if (act === 'ok') { sfx.ok(); return activate(); }
   } else if (zone === 'tabs') {
     if (act === 'left' && tabFocus > 0) { tabFocus--; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
-    else if (act === 'right' && tabFocus < 3) { tabFocus++; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
+    else if (act === 'right' && tabFocus < 4) { tabFocus++; sfx.move(); if (tabFocus < 2) switchTab(TABS[tabFocus]); }
     else if (act === 'down' || act === 'back') zone = 'row';
     else if (act === 'ok') {
       sfx.ok();
       if (tabFocus === 2) return openSearch();
-      if (tabFocus === 3) return openSettings();
+      if (tabFocus === 3) return openSocial();
+      if (tabFocus === 4) return openSettings();
       switchTab(TABS[tabFocus]);
       zone = 'row';
     }
@@ -985,8 +992,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 // Gamepad: A/✕=ok, B/○=back, X/□=add, Y/△ or Start=menu, D-pad / left stick = move
-const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 9: 'menu', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
-const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'up', 'down', 'left', 'right'];
+const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
+const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'start', 'up', 'down', 'left', 'right'];
 const padState = {};
 function pollPads() {
   const now = performance.now();
@@ -1068,6 +1075,7 @@ $('#row').addEventListener('wheel', (e) => {
 $$('.tabs .tab').forEach((t) => (t.onclick = () => { zone = 'row'; switchTab(t.dataset.tab); sfx.move(); update(); }));
 $('[data-action="settings"]').onclick = () => { sfx.ok(); openSettings(); };
 $('[data-action="search"]').onclick = () => { sfx.ok(); openSearch(); };
+$('[data-action="friends"]').onclick = () => { sfx.ok(); openSocial(); };
 $('#btnPlay').onclick = () => { sfx.ok(); activate(); };
 $('#btnMore').onclick = () => { sfx.ok(); openOptions(); };
 
@@ -1083,7 +1091,8 @@ function applyUser() {
 }
 
 // ---------- Boot ----------
-(async () => {
+// wait for feed.js / overlays.js / social.js too — the IPC reply can otherwise beat their loading
+window.addEventListener('DOMContentLoaded', async () => {
   const m = document.createElement('div');
   m.id = 'measure';
   m.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:var(--tile);height:var(--gap)';
@@ -1108,6 +1117,7 @@ function applyUser() {
   setInterval(tick, 10000);
   feedInit();
   render();
+  socialStart();
   requestAnimationFrame(pollPads);
   // fade in once the first frame is laid out
   setTimeout(() => document.body.classList.remove('booting'), 120);
@@ -1120,4 +1130,4 @@ function applyUser() {
       toast(`Доступно обновление ${u.latest} — Настройки → Проверить обновления`);
     }
   }, 8000);
-})();
+});

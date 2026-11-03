@@ -198,6 +198,19 @@ async function json(url) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+// Like json() but never throws: { status, data } where data is null for non-JSON bodies
+async function probe(url) {
+  try {
+    const r = await fetch(url);
+    let data = null;
+    try { data = await r.json(); } catch {}
+    return { status: r.status, data };
+  } catch {
+    return { status: 0, data: null };
+  }
+}
+// Steam answers 403 with an HTML page for a bad key, but 403 + JSON for a private profile
+const keyRejected = (p) => (p.status === 401 || p.status === 403) && !p.data;
 
 function newsImage(contents) {
   const m = contents.match(/\{STEAM_CLAN_IMAGE\}[^\s\[\]"'<>]+|https?:\/\/[^\s\[\]"'<>]+\.(?:png|jpe?g|gif|webp)/i);
@@ -237,16 +250,18 @@ function news(appid) {
 }
 
 function achievements(appid, key, steamId) {
-  return cached(`ach${appid}:${steamId}`, 5 * 60e3, async () => {
-    const [player, schema, global] = await Promise.all([
-      json(`https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?appid=${appid}&key=${key}&steamid=${steamId}&l=russian`).catch((e) => ({ error: e.message })),
+  return cached(`ach${appid}:${steamId}:${key.slice(-6)}`, 5 * 60e3, async () => {
+    const [p, schema, global] = await Promise.all([
+      probe(`https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?appid=${appid}&key=${key}&steamid=${steamId}&l=russian`),
       json(`https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?appid=${appid}&key=${key}&l=russian`).catch(() => ({})),
       json(`https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid=${appid}`).catch(() => ({}))
     ]);
-    const list = player.playerstats?.achievements;
+    if (keyRejected(p)) return { error: 'badkey' };
+    if (!p.status) return { error: 'network' };
+    const list = p.data?.playerstats?.achievements;
     if (!list) {
-      const msg = player.playerstats?.error || player.error || '';
-      return { error: /403|private/i.test(msg) ? 'private' : /no stats|requested app has no stats/i.test(msg) ? 'none' : 'error' };
+      const msg = p.data?.playerstats?.error || '';
+      return { error: /not public|private/i.test(msg) ? 'private' : /no stats|has no stats|not found/i.test(msg) || p.status === 400 ? 'none' : 'error', message: msg };
     }
     const meta = Object.fromEntries((schema.game?.availableGameStats?.achievements || []).map((a) => [a.name, a]));
     const pct = Object.fromEntries((global.achievementpercentages?.achievements || []).map((a) => [a.name, +a.percent]));
@@ -264,16 +279,38 @@ function achievements(appid, key, steamId) {
 }
 
 function friends(key, steamId) {
-  return cached('friends' + steamId, 45e3, async () => {
-    const fl = await json(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${steamId}&relationship=friend`);
-    const ids = (fl.friendslist?.friends || []).map((f) => f.steamid).slice(0, 100);
-    if (!ids.length) return [];
+  return cached('friends' + steamId + key.slice(-6), 45e3, async () => {
+    const fl = await probe(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${steamId}&relationship=friend`);
+    if (keyRejected(fl) && fl.status === 403) return { error: 'badkey' };
+    if (fl.status === 401) return { error: 'private' };
+    if (!fl.status) return { error: 'network' };
+    const ids = (fl.data?.friendslist?.friends || []).map((f) => f.steamid).slice(0, 100);
+    if (!ids.length) return { list: [] };
     const s = await json(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${key}&steamids=${ids.join(',')}`);
-    return (s.response?.players || []).map((p) => ({
-      id: p.steamid, name: p.personaname, avatar: p.avatarfull || p.avatarmedium,
-      state: p.personastate, game: p.gameextrainfo || null, gameId: p.gameid || null
-    }));
+    return {
+      list: (s.response?.players || []).map((p) => ({
+        id: p.steamid, name: p.personaname, avatar: p.avatarfull || p.avatarmedium,
+        state: p.personastate, game: p.gameextrainfo || null, gameId: p.gameid || null
+      }))
+    };
   });
+}
+
+// What the account dialog shows: is the key accepted, which profile is it, is it public
+async function checkAccount(key, steamId) {
+  if (!key) return { error: 'nokey' };
+  const s = await probe(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${key}&steamids=${steamId}`);
+  if (!s.status) return { error: 'network' };
+  if (s.status === 401 || s.status === 403) return { error: 'badkey' };
+  const p = s.data?.response?.players?.[0];
+  if (!p) return { error: 'noprofile' };
+  const fl = await probe(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${steamId}&relationship=friend`);
+  return {
+    name: p.personaname,
+    avatar: p.avatarfull || p.avatarmedium,
+    public: p.communityvisibilitystate === 3,
+    friendsVisible: fl.status === 200
+  };
 }
 
 function sales(steamId) {
@@ -320,4 +357,4 @@ function trailer(appid) {
   });
 }
 
-module.exports = { scan, localStats, currentUser, watchRunning, running, news, achievements, friends, sales, trailer };
+module.exports = { scan, localStats, currentUser, watchRunning, running, news, achievements, friends, checkAccount, sales, trailer };
