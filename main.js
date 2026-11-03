@@ -28,6 +28,8 @@ const DEFAULT_DATA = {
 let win;
 // set while the launcher is minimised because a game is running; cleared when the game exits
 let hiddenForGame = false;
+let pad = null;        // background gamepad watcher
+let gameHwnd = null;   // window that was in front when the Guide button summoned us
 
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => restoreWindow());
@@ -87,6 +89,7 @@ function restoreWindow() {
 }
 
 function gameEnded() {
+  gameHwnd = null;
   if (!hiddenForGame) return;
   hiddenForGame = false;
   restoreWindow();
@@ -157,6 +160,14 @@ ipcMain.handle('win:stepAside', () => {
   win.setAlwaysOnTop(false);
   hiddenForGame = true;
   win.minimize();
+});
+// "Back to game": minimising alone lets Windows pick any window, so explicitly re-activate the game's window
+ipcMain.handle('win:returnToGame', () => {
+  if (!win) return;
+  win.setAlwaysOnTop(false);
+  hiddenForGame = true;
+  win.minimize();
+  if (gameHwnd) setTimeout(() => pad?.focus(gameHwnd), 150);
 });
 
 ipcMain.handle('game:launch', async (_e, game) => {
@@ -260,13 +271,16 @@ app.whenReady().then(() => {
   createWindow();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
-  const stopPad = gamepad.watch(hwnd, (ev) => {
-    if (ev === 'front') {
+  pad = gamepad.watch(hwnd, (ev) => {
+    if (ev.startsWith('front')) {
+      // the window that was in front when Guide was pressed — normally the game
+      const prev = ev.split(' ')[1];
+      if (prev && prev !== '0' && prev !== hwnd) gameHwnd = prev;
       restoreWindow();
-      send('pad:guide', { from: 'background' });
-    } else if (ev === 'toggle') send('pad:guide', { from: 'front' });
+      send('pad:guide', { from: 'background', canReturn: !!gameHwnd });
+    } else if (ev === 'toggle') send('pad:guide', { from: 'front', canReturn: !!gameHwnd });
   });
-  app.on('will-quit', stopPad);
+  app.on('will-quit', () => pad.stop());
   steam.watchRunning((id, prev) => {
     send('steam:running', { id, prev, at: Date.now() });
     if (!id && prev) gameEnded();

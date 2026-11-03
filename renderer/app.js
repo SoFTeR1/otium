@@ -933,6 +933,7 @@ function handle(act, src) {
     return;
   }
   if (osk.open) return oskHandle(act);
+  if (act === 'lb') return;
   if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);
   if (cc.open) return ccHandle(act);
@@ -992,8 +993,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 // Gamepad: A/✕=ok, B/○=back, X/□=add, Y/△ or Start=menu, D-pad / left stick = move
-const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
-const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'start', 'up', 'down', 'left', 'right'];
+const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 4: 'lb', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
+const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'lb', 'start', 'up', 'down', 'left', 'right'];
 const padState = {};
 function pollPads() {
   const now = performance.now();

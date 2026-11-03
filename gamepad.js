@@ -20,8 +20,24 @@ public static class PadWatch {
   [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   const ushort GUIDE = 0x0400, BACK = 0x0020, START = 0x0010;
+  // stdin: "focus <hwnd>" activates that window (used to hand control back to the game)
   public static void Run(long hwnd) {
-    IntPtr h = new IntPtr(hwnd);
+    Thread t = new Thread(() => Poll(new IntPtr(hwnd)));
+    t.IsBackground = true;
+    t.Start();
+    string line;
+    while ((line = Console.In.ReadLine()) != null) {
+      long v;
+      if (line.StartsWith("focus ") && long.TryParse(line.Substring(6), out v) && v != 0) Activate(new IntPtr(v));
+    }
+  }
+  static void Activate(IntPtr w) {
+    if (IsIconic(w)) ShowWindow(w, 9);
+    keybd_event(0x12, 0, 0, UIntPtr.Zero);
+    keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    SetForegroundWindow(w);
+  }
+  static void Poll(IntPtr h) {
     ushort[] prev = new ushort[4];
     while (true) {
       for (int i = 0; i < 4; i++) {
@@ -31,13 +47,12 @@ public static class PadWatch {
         bool guide = (b & GUIDE) != 0 && (p & GUIDE) == 0;
         bool combo = (b & (BACK | START)) == (BACK | START) && (p & (BACK | START)) != (BACK | START);
         if (guide || combo) {
-          if (GetForegroundWindow() == h && !IsIconic(h)) Say("toggle");
+          IntPtr fg = GetForegroundWindow();
+          if (fg == h && !IsIconic(h)) Say("toggle");
           else {
-            if (IsIconic(h)) ShowWindow(h, 9);
-            keybd_event(0x12, 0, 0, UIntPtr.Zero);
-            keybd_event(0x12, 0, 2, UIntPtr.Zero);
-            SetForegroundWindow(h);
-            Say("front");
+            // report what was in front (normally the game) so we can return to it later
+            Activate(h);
+            Say("front " + fg.ToInt64());
           }
         }
         prev[i] = b;
@@ -65,7 +80,10 @@ ${SOURCE}
     proc.on('exit', () => { if (!stopped) setTimeout(start, 5000); });
   };
   start();
-  return () => { stopped = true; proc?.kill(); };
+  return {
+    stop: () => { stopped = true; proc?.kill(); },
+    focus: (hwnd) => proc?.stdin.writable && proc.stdin.write(`focus ${hwnd}\n`)
+  };
 }
 
 module.exports = { watch };

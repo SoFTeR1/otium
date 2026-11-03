@@ -7,7 +7,8 @@ const OSK_LAYOUTS = {
   en: ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm,.'],
   sym: ['1234567890', '-/:;()?!@"', '#%+=_*&\'<>', '~$€₽[]{}|\\']
 };
-const osk = { open: false, input: null, layout: 'ru', shift: false, row: 1, el: null, onDone: null };
+// shift = one capital letter (⇧ key), caps = Caps Lock (LB on the gamepad)
+const osk = { open: false, input: null, layout: 'ru', shift: false, caps: false, row: 1, el: null, onDone: null };
 
 function openOSK(input, { onDone } = {}) {
   osk.open = true;
@@ -28,12 +29,13 @@ function closeOSK(submit) {
 }
 
 function renderOSK() {
-  const rows = OSK_LAYOUTS[osk.layout].map((r) => [...r].map((ch) => (osk.shift ? ch.toUpperCase() : ch)));
+  const upper = osk.shift !== osk.caps;
+  const rows = OSK_LAYOUTS[osk.layout].map((r) => [...r].map((ch) => (upper ? ch.toUpperCase() : ch)));
   const keyHTML = (label, act, cls = '') => `<button class="key ${cls}" data-act="${esc(act)}">${esc(label)}</button>`;
   $('#osk').innerHTML = `
     <div class="osk-field">${esc(osk.input.value)}<i class="caret"></i></div>
     <div class="osk-keys">
-      ${rows.map((r, i) => `<div class="krow">${i === 3 ? keyHTML('⇧', 'shift', 'wide' + (osk.shift ? ' on' : '')) : ''}${r.map((ch) => keyHTML(ch, 'c:' + ch)).join('')}${i === 3 ? keyHTML('⌫', 'back', 'wide') : ''}</div>`).join('')}
+      ${rows.map((r, i) => `<div class="krow">${i === 3 ? keyHTML(osk.caps ? '⇪' : '⇧', 'shift', 'wide' + (osk.shift || osk.caps ? ' on' : '')) : ''}${r.map((ch) => keyHTML(ch, 'c:' + ch)).join('')}${i === 3 ? keyHTML('⌫', 'back', 'wide') : ''}</div>`).join('')}
       <div class="krow">
         ${keyHTML(osk.layout === 'sym' ? 'АБВ' : '?123', 'sym', 'wide')}
         ${keyHTML(osk.layout === 'en' ? 'RU' : 'EN', 'lang', 'wide')}
@@ -42,7 +44,7 @@ function renderOSK() {
         ${keyHTML('Готово', 'done', 'wide done')}
       </div>
     </div>
-    <div class="osk-hints">${oskHint('add', 'стереть')}${oskHint('menu', 'пробел')}<span><b class="kb">Start</b> готово</span>${oskHint('back', 'закрыть')}</div>`;
+    <div class="osk-hints"><span><b class="kb">LB</b> ${osk.caps ? 'строчные' : 'заглавные'}</span>${oskHint('add', 'стереть')}${oskHint('menu', 'пробел')}<span><b class="kb">Start</b> готово</span>${oskHint('back', 'закрыть')}</div>`;
   const keys = $$('#osk .key');
   // keep the cursor on the "same" key after re-render
   const prev = osk.el;
@@ -116,6 +118,7 @@ function oskHandle(act) {
   if (act === 'add') return pressKey('back');
   if (act === 'menu') return pressKey('space');
   if (act === 'start') return closeOSK(true);
+  if (act === 'lb') { osk.caps = !osk.caps; osk.shift = false; sfx.move(); return renderOSK(); }
   if (act === 'back') { sfx.back(); return closeOSK(false); }
 }
 
@@ -149,11 +152,17 @@ function closeCC() {
   setTimeout(() => !cc.open && $('#cc').classList.add('hidden'), 300);
 }
 
+function backToGame() {
+  closeCC();
+  ipc.returnToGame();
+}
+
 function renderCC() {
   const g = runningGame();
   const m = currentMusic;
   const items = [];
-  if (g) items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: () => { closeCC(); ipc.stepAside(); } });
+  if (g) items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
+  else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
   items.push({ cls: 'home', html: `${CC_ICONS.home}<div class="d">Главная</div>`, ok: () => { closeCC(); zone = 'row'; update(); } });
   if (m?.title) {
     items.push({ cls: 'wide music', html: `<div class="ccimg ${music.art ? '' : 'noart'}" ${music.art ? `style="background-image:url('${music.art}')"` : ''}>${music.art ? '' : '♪'}</div><div><div class="d">${esc(appName(m.app))}</div><div class="t">${esc(m.title)}</div><div class="d">${esc(m.artist || '')}</div></div>`, ok: () => musicCmd('toggle').then(renderCC) });
@@ -184,18 +193,20 @@ function ccHandle(act) {
 }
 
 const CC_ICONS = {
+  back: '<svg class="ci" viewBox="0 0 24 24"><path d="M10 6 4 12l6 6v-4h6a4 4 0 0 0 4-4V6h-2v4a2 2 0 0 1-2 2h-6V6z"/></svg>',
   home: '<svg class="ci" viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3z"/></svg>',
   chat: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 4h16v11H8l-4 4zM7 8h10v2H7zm0 3h7v2H7z"/></svg>',
   settings: '<svg class="ci" viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>'
 };
 
 // Guide / View+Start from the background watcher
-ipc.onGuide(({ from }) => {
+ipc.onGuide(({ from, canReturn }) => {
+  cc.canReturn = !!canReturn;
   if (osk.open) closeOSK(false);
   if (from === 'front' && cc.open) {
-    closeCC();
     // second press while a game runs = back to the game, like the PS button
-    if (runningGame()) ipc.stepAside();
+    if (runningGame() || cc.canReturn) backToGame();
+    else closeCC();
     return;
   }
   if (modal.open) closeModal();

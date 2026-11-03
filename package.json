@@ -1,7 +1,7 @@
 {
   "name": "ps5-launcher",
   "productName": "PS5 Launcher",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "PS5-style game launcher for Windows",
   "author": "SoFTeR1",
   "repository": "github:SoFTeR1/ps5-launcher",
