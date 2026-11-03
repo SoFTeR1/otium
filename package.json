@@ -1,22 +1,27 @@
 {
   "name": "ps5-launcher",
   "productName": "PS5 Launcher",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "PS5-style game launcher for Windows",
   "author": "SoFTeR1",
   "repository": "github:SoFTeR1/ps5-launcher",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis",
+    "assets": "electron build/make-assets.js",
+    "dist": "electron build/make-assets.js && electron-builder --win nsis",
     "vendor": "node -e \"const fs=require('fs');fs.copyFileSync('node_modules/hls.js/dist/hls.min.js','renderer/vendor/hls.min.js');fs.copyFileSync('node_modules/nostr-tools/lib/nostr.bundle.js','renderer/vendor/nostr.bundle.js')\""
   },
   "build": {
     "appId": "local.ps5launcher",
     "productName": "PS5 Launcher",
+    "copyright": "SoFTeR1",
+    "directories": {
+      "buildResources": "build"
+    },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -25,7 +30,21 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "PS5 Launcher",
-      "artifactName": "PS5-Launcher-Setup-${version}.${ext}"
+      "uninstallDisplayName": "PS5 Launcher",
+      "artifactName": "PS5-Launcher-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerLanguages": ["ru_RU"],
+      "language": "1049",
+      "multiLanguageInstaller": true,
+      "displayLanguageSelector": false,
+      "include": "build/installer.nsh",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     },
     "publish": {
       "provider": "github",
