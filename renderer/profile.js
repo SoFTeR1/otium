@@ -406,9 +406,12 @@ const POWER_ICONS = {
 
 // ---------- Discord Rich Presence ----------
 let launchStarted = {};
-function updateDiscord() {
+async function updateDiscord() {
   if (!data.settings.discordId) return;
   ipc.discordActivity(buildActivity()); // renderer/presence.js — also drives the preview card
+  // a game outside Steam: find public art for it once, then send again with the picture
+  const g = data.games.find((x) => running.has(x.id));
+  if (g && !gameArt(g) && g.publicArt?.for !== g.name && (await ensureGameArt(g)) && running.has(g.id)) ipc.discordActivity(buildActivity());
 }
 ipc.onSteamRunning(() => setTimeout(updateDiscord, 500));
 ipc.onGameExited(() => setTimeout(updateDiscord, 500));

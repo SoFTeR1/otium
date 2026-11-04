@@ -21,6 +21,53 @@ async function discordAppInfo() {
   return (presence.app = cached || { name: 'OTIUM', icon: APP_ICON_URL });
 }
 
+// ---------- game art Discord can show ----------
+// Discord only displays images by public URL. Steam games have their store art; for everything else
+// (exe games with a cover picked from disk) we look the game up once — Steam store first, then
+// Wikipedia's article image (usually the box art) — and remember the result on the game.
+// Numbers in the name must match ("UFC 6" never borrows "UFC 5"'s cover).
+const nums = (s) => (String(s).match(/\d+/g) || []).join(' ');
+const plainName = (s) => String(s).toLowerCase().replace(/[™®©]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+function sameGame(name, title) {
+  if (nums(name) !== nums(title.replace(/\((?:\d{4} )?video game\)|\b(19|20)\d{2}\b/gi, ''))) return false;
+  // the whole name, in order, spaces ignored: "Drive Club" fits "Driveclub" but not "Club Drive"
+  return plainName(title).replace(/ /g, '').includes(plainName(name).replace(/ /g, ''));
+}
+async function findPublicArt(name) {
+  try {
+    const r = await (await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(name)}&cc=US&l=english`)).json();
+    const hit = (r.items || []).find((it) => sameGame(name, it.name));
+    if (hit) return `${STEAM_CDN}/${hit.id}/header.jpg`;
+  } catch {}
+  // as typed, then written together ("Drive Club" → "Driveclub")
+  const terms = [...new Set([name, plainName(name).replace(/ /g, '')])];
+  for (const term of terms) {
+    try {
+      const q = `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=5&prop=pageimages&piprop=original&pilicense=any&gsrsearch=${encodeURIComponent(term + ' video game')}`;
+      const pages = Object.values((await (await fetch(q)).json()).query?.pages || {}).sort((a, b) => a.index - b.index);
+      const hit = pages.find((p) => p.original?.source && sameGame(name, p.title));
+      if (hit) return hit.original.source.replace(/\?.*$/, '');
+    } catch {}
+  }
+  return '';
+}
+// returns a public URL for the game's art (cached), '' when nothing fits
+async function ensureGameArt(g) {
+  if (!g || steamIdOf(g)) return '';
+  if (/^https:\/\//i.test(g.cover || '')) return g.cover;
+  if (g.publicArt?.for === g.name) return g.publicArt.url;
+  const url = await findPublicArt(g.name);
+  g.publicArt = { for: g.name, url };
+  save();
+  return url;
+}
+function gameArt(g) {
+  const sid = steamIdOf(g);
+  if (sid) return `${STEAM_CDN}/${sid}/header.jpg`;
+  if (/^https:\/\//i.test(g.cover || '')) return g.cover;
+  return g.publicArt?.for === g.name ? g.publicArt.url : '';
+}
+
 // what Discord gets right now (null = nothing / turned off)
 function buildActivity() {
   const s = data.settings;
@@ -32,7 +79,7 @@ function buildActivity() {
       details: hide ? 'Играет в игру' : `Играет в ${g.name}`,
       state: (s.discordState || '').trim() || 'через OTIUM',
       assets: {
-        large_image: !hide && sid ? `${STEAM_CDN}/${sid}/header.jpg` : APP_ICON_URL,
+        large_image: (!hide && gameArt(g)) || APP_ICON_URL,
         large_text: hide ? 'OTIUM' : g.name,
         small_image: APP_ICON_URL,
         small_text: 'OTIUM'
@@ -104,6 +151,7 @@ async function openDiscordScreen(focus = 0) {
   const on = !!s.discordId;
   const connected = on && (await ipc.discordStatus().catch(() => false));
   await discordAppInfo();
+  await ensureGameArt(data.games.find((x) => running.has(x.id)));
   const row = (id, label, val) => `<button class="menu-item focusable" data-id="${id}">${esc(label)}<span class="val">${esc(val)}</span></button>`;
   openModal(`
     <div class="rp-wrap">

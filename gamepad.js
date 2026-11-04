@@ -22,10 +22,10 @@ public static class PadWatch {
   static readonly string[] NotGames = { "steam", "steamwebhelper", "steamerrorreporter", "gameoverlayui", "explorer", "ps5 launcher", "otium",
     "powershell", "conhost", "discord", "epicgameslauncher", "eadesktop", "ubisoftconnect", "upc", "galaxyclient", "battle.net", "crashpad_handler" };
   // The game is the top-most visible window whose process started after we launched it.
-  // It may take a while to appear, so keep looking for up to 25 seconds.
+  // It may take a while to appear (emulators boot first), so keep looking for up to 90 seconds.
   static void FocusNew(long sinceMs, IntPtr own) {
     var since = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(sinceMs).AddSeconds(-2);
-    for (int attempt = 0; attempt < 50; attempt++) {
+    for (int attempt = 0; attempt < 180; attempt++) {
       IntPtr found = IntPtr.Zero;
       EnumWindows((w, l) => {
         if (w == own || !IsWindowVisible(w) || GetWindowTextLength(w) == 0 || GetWindow(w, 4) != IntPtr.Zero) return true;

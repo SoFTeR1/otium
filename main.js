@@ -382,9 +382,9 @@ ipcMain.handle('game:close', async (_e, game) => {
   if (sid) {
     const dir = await steam.installDir(sid);
     if (dir) (await processesUnder({ dir })).forEach((p) => pids.add(p));
-  } else if (/\.exe$/i.test(game.path || '')) {
-    const exe = path.normalize(game.path.trim().replace(/^"|"$/g, ''));
-    (await processesUnder({ exe, dir: gameDir(exe) })).forEach((p) => pids.add(p));
+  } else {
+    const t = exeTarget(game);
+    if (t) (await processesUnder({ exe: t.exe, dir: gameDir(t.exe) })).forEach((p) => pids.add(p));
   }
   if (!pids.size) return { ok: false, error: 'Не нашёл процесс игры' };
   return killAll(pids);
@@ -409,6 +409,26 @@ async function killAll(pids) {
   return { ok: true, count: pids.size, forced: stubborn.length > 0 };
 }
 
+// The exe behind a game entry: the path itself, or what a .lnk shortcut points to (with its arguments
+// and start folder), so shortcut-added games are started and tracked like exe games.
+// Store launchers stay with the shell: they keep running after the game, which would look like playing forever.
+const STORE_LAUNCHERS = /^(steam|epicgameslauncher|galaxyclient|ubisoftconnect|upc|eadesktop|origin|battle\.net|riotclientservices|amazongames)\.exe$/i;
+function exeTarget(game) {
+  const p = (game.path || '').trim().replace(/^"|"$/g, '');
+  const extra = parseArgs(game.args || '');
+  let t = null;
+  if (/\.exe$/i.test(p)) t = { exe: path.normalize(p), args: extra, cwd: path.dirname(p) };
+  else if (/\.lnk$/i.test(p) && process.platform === 'win32') {
+    try {
+      const l = shell.readShortcutLink(p);
+      if (l.target && /\.exe$/i.test(l.target) && fs.existsSync(l.target)) {
+        t = { exe: path.normalize(l.target), args: [...parseArgs(l.args || ''), ...extra], cwd: l.cwd && fs.existsSync(l.cwd) ? l.cwd : path.dirname(l.target) };
+      }
+    } catch {}
+  }
+  return t && !STORE_LAUNCHERS.test(path.basename(t.exe)) ? t : null;
+}
+
 // exe games we started that still have processes alive
 ipcMain.handle('game:running', () => [...gamePids.keys()]);
 
@@ -422,20 +442,21 @@ ipcMain.handle('game:launch', async (_e, game) => {
   }
   if (!fs.existsSync(target)) return { ok: false, error: 'Файл не найден: ' + target };
 
-  if (path.extname(target).toLowerCase() !== '.exe') {
+  const exe = exeTarget(game);
+  if (!exe) {
     const err = await shell.openPath(target);
     return err ? { ok: false, error: err } : { ok: true, tracked: false };
   }
 
   const started = Date.now();
   return new Promise((resolve) => {
-    const child = spawn(target, parseArgs(game.args || ''), { cwd: path.dirname(target), detached: true, stdio: 'ignore' });
+    const child = spawn(exe.exe, exe.args, { cwd: exe.cwd, detached: true, stdio: 'ignore' });
     child.once('spawn', () => {
       child.unref();
       gamePids.set(game.id, child.pid);
       child.once('exit', async () => {
         // a launcher-style exe may hand off to other processes of the game: wait until its folder is quiet
-        const dir = gameDir(target);
+        const dir = gameDir(exe.exe);
         while (dir && (await processesUnder({ dir })).length) await new Promise((r) => setTimeout(r, 3000));
         if (gamePids.get(game.id) !== child.pid) return; // started again meanwhile
         gamePids.delete(game.id);
