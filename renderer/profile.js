@@ -408,28 +408,7 @@ const POWER_ICONS = {
 let launchStarted = {};
 function updateDiscord() {
   if (!data.settings.discordId) return;
-  const g = data.games.find((x) => running.has(x.id));
-  if (g) {
-    const sid = steamIdOf(g);
-    const start = steamSince[sid] || launchStarted[g.id] || Date.now();
-    ipc.discordActivity({
-      details: `Играет в ${g.name}`,
-      state: 'через OTIUM',
-      timestamps: { start },
-      assets: {
-        large_image: sid ? `${STEAM_CDN}/${sid}/header.jpg` : APP_ICON_URL,
-        large_text: g.name,
-        small_image: APP_ICON_URL,
-        small_text: 'OTIUM'
-      }
-    });
-  } else {
-    ipc.discordActivity({
-      details: 'В главном меню',
-      state: `${data.games.length} ${plural(data.games.length, 'игра', 'игры', 'игр')} в библиотеке`,
-      assets: { large_image: APP_ICON_URL, large_text: 'OTIUM' }
-    });
-  }
+  ipc.discordActivity(buildActivity()); // renderer/presence.js — also drives the preview card
 }
 ipc.onSteamRunning(() => setTimeout(updateDiscord, 500));
 ipc.onGameExited(() => setTimeout(updateDiscord, 500));

@@ -1004,7 +1004,7 @@ function openSettings(focus = 0) {
     ['user', 'Имя пользователя', s.user],
     ['steam', 'Импорт игр из Steam', ''],
     ['account', 'Аккаунт Steam (трофеи, друзья)', s.steamApiKey ? 'Подключён' : 'Не подключён'],
-    ['discord', 'Статус в Discord «Играет в…»', onoff(!!s.discordId)],
+    ['discord', 'Статус в Discord', s.discordId ? 'Вкл · предпросмотр' : 'Выкл'],
     ['sort', 'Порядок игр', SORT_NAMES[s.sortMode || 'recent']],
     ['sep'],
     ['wallpaper', 'Общие фоны (картинки или видео)', s.wallpapers?.length ? `${s.wallpapers.length} шт.` : 'Стандартный'],
@@ -1049,10 +1049,7 @@ function openSettings(focus = 0) {
       await save();
       return openSettings(i);
     }
-    if (id === 'discord') {
-      await toggleDiscord();
-      return openSettings(i);
-    }
+    if (id === 'discord') return openDiscordScreen();
     if (id === 'power') return openPower();
     if (id === 'sort') {
       const order = ['recent', 'alpha', 'custom'];

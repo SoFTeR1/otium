@@ -214,7 +214,8 @@ function renderCC() {
   cc.items = items;
   cc.idx = Math.min(cc.idx, items.length - 1);
   $('#cc').innerHTML = `<div class="cc-bar">${items.map((it, i) => `<div class="cci ${it.cls}" data-i="${i}">${it.html}</div>`).join('')}</div>
-    <div class="cc-time">${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div>`;
+    <div class="cc-time">${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div>
+    <div class="cc-rp">${presenceMini()}</div>`;
   $$('#cc .cci').forEach((el) => (el.onclick = () => { cc.idx = +el.dataset.i; focusCC(); cc.items[cc.idx].ok(); }));
   focusCC();
 }
