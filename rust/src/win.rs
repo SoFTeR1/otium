@@ -501,3 +501,26 @@ pub fn pin_overlay(h: isize, rect: (i32, i32, i32, i32), restack: bool, last_ex:
         }
     }
 }
+
+/// Creates (or overwrites) a .lnk at `path` that starts `target` in its own folder.
+pub fn write_shortcut(path: &Path, target: &Path) -> bool {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { return false };
+        let t = target.as_os_str().encode_wide_null();
+        let _ = link.SetPath(PCWSTR(t.as_ptr()));
+        if let Some(dir) = target.parent() {
+            let d = dir.as_os_str().encode_wide_null();
+            let _ = link.SetWorkingDirectory(PCWSTR(d.as_ptr()));
+        }
+        let _ = link.SetIconLocation(PCWSTR(t.as_ptr()), 0);
+        let Ok(file) = link.cast::<IPersistFile>() else { return false };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let p = path.as_os_str().encode_wide_null();
+        file.Save(PCWSTR(p.as_ptr()), true).is_ok()
+    }
+}

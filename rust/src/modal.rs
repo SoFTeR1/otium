@@ -38,6 +38,7 @@ pub enum SetMenu {
     Discord,
     Power,
     Timer,
+    Search,
     Profile,
     Friend,
     Call,
@@ -55,6 +56,7 @@ pub enum SetKey {
     Layout,
     Sounds,
     Ambient,
+    SplashSound,
     Splash,
     Fullscreen,
     Autostart,
@@ -88,6 +90,7 @@ pub enum SetKey {
     FriendRemove,
     FriendCall,
     FriendProfile,
+    SearchHit,
     CallMute,
     CallDeafen,
     CallVolume,
@@ -177,6 +180,16 @@ impl Modal {
             Modal::Players { items, .. } => items.len(),
             Modal::Pick { items, .. } => items.len() + 1,
             Modal::Keyboard(_) | Modal::PadTest(_) => 0,
+        }
+    }
+
+    /// Focus a row (the mouse is over it).
+    pub fn set_focus(&mut self, i: usize) {
+        let n = self.item_count();
+        if let Some(f) = self.focus_mut() {
+            if i < n {
+                *f = i;
+            }
         }
     }
 
@@ -355,6 +368,7 @@ impl Modal {
                         continue;
                     }
                     let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    crate::mouse::add(row, crate::mouse::Hit::Row(i));
                     let f = i == *focus;
                     if f {
                         clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
@@ -395,6 +409,7 @@ impl Modal {
                         continue;
                     }
                     let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    crate::mouse::add(row, crate::mouse::Hit::Row(i));
                     let f = i == *focus;
                     if f {
                         clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
@@ -428,6 +443,7 @@ impl Modal {
                         continue;
                     }
                     let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    crate::mouse::add(row, crate::mouse::Hit::Row(i));
                     let f = i == *focus;
                     if f {
                         clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
@@ -475,6 +491,7 @@ impl Modal {
                         continue;
                     }
                     let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    crate::mouse::add(row, crate::mouse::Hit::Row(i));
                     let f = i == *focus;
                     if f {
                         clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
@@ -514,6 +531,7 @@ impl Modal {
                         continue;
                     }
                     let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    crate::mouse::add(row, crate::mouse::Hit::Row(i));
                     let f = i == *focus;
                     let on = picked.contains(&g.app_id);
                     if f {
@@ -576,6 +594,7 @@ fn rows(ui: &egui::Ui, r: Rect, s: f32, items: &[&str], focus: usize, a: f32) {
     let p = ui.painter();
     for (i, label) in items.iter().enumerate() {
         let row = Rect::from_min_size(pos2(r.left(), r.top() + i as f32 * ROW * s), vec2(r.width(), ROW * s - 6.0 * s));
+        crate::mouse::add(row, crate::mouse::Hit::Row(i));
         let f = i == focus;
         if f {
             p.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(a));

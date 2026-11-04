@@ -8,12 +8,14 @@ mod discord;
 mod draw;
 mod fonts;
 mod input;
+mod installer;
 mod keyboard;
 mod launch;
 mod nostr;
 mod overlay;
 mod padtest;
 mod modal;
+mod mouse;
 mod sound;
 mod steam;
 mod media;
@@ -21,6 +23,7 @@ mod mixer;
 mod steam_api;
 mod thumbs;
 mod tray;
+mod update;
 mod voice;
 mod watch;
 mod win;
@@ -28,6 +31,10 @@ mod win;
 use std::sync::Arc;
 
 fn main() -> eframe::Result {
+    // OTIUM-Setup-X.exe, the Electron updater, a self-update or the uninstaller: no window
+    if installer::handle_args() {
+        return Ok(());
+    }
     let fullscreen = data::Library::load().setting_bool("fullscreen", true);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("OTIUM")

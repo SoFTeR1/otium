@@ -6,8 +6,8 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
 
 const RATE: u32 = 44_100;
-/// the splash chord used to come out at 2.0 and was far too loud next to the UI sounds (-9 dB)
-const SPLASH_GAIN: f32 = 0.7;
+/// the splash chord at "Средне"; Настройки → Звук заставки scales it (`play_gain`)
+const SPLASH_GAIN: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sfx {
@@ -29,27 +29,33 @@ pub enum Sfx {
     MicOff,
 }
 
-static TX: OnceLock<Sender<Sfx>> = OnceLock::new();
+static TX: OnceLock<Sender<(Sfx, f32)>> = OnceLock::new();
 
 /// Plays a sound (does nothing if there is no audio device).
 pub fn play(s: Sfx) {
+    play_gain(s, 1.0);
+}
+
+/// Plays a sound `gain` times as loud.
+pub fn play_gain(s: Sfx, gain: f32) {
     let tx = TX.get_or_init(|| {
-        let (tx, rx) = channel::<Sfx>();
+        let (tx, rx) = channel::<(Sfx, f32)>();
         std::thread::Builder::new()
             .name("sound".into())
             .spawn(move || {
                 let Ok((_stream, handle)) = rodio::OutputStream::try_default() else { return };
                 let mut cache: std::collections::HashMap<Sfx, std::sync::Arc<Vec<f32>>> = Default::default();
-                while let Ok(s) = rx.recv() {
+                while let Ok((s, gain)) = rx.recv() {
                     let buf = cache.entry(s).or_insert_with(|| std::sync::Arc::new(render(s))).clone();
-                    let src = rodio::buffer::SamplesBuffer::new(2, RATE, (*buf).clone());
+                    let samples: Vec<f32> = buf.iter().map(|v| (v * gain).clamp(-1.0, 1.0)).collect();
+                    let src = rodio::buffer::SamplesBuffer::new(2, RATE, samples);
                     let _ = handle.play_raw(rodio::Source::convert_samples::<f32>(src));
                 }
             })
             .ok();
         tx
     });
-    let _ = tx.send(s);
+    let _ = tx.send((s, gain));
 }
 
 #[derive(Clone, Copy)]
@@ -295,5 +301,24 @@ mod tests {
         assert_eq!(b.len(), (7.5 * RATE as f32) as usize * 2);
         let peak = b.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(peak > 0.01 && peak <= 1.0, "peak {peak}");
+    }
+}
+
+/// `settings.splashSound` = "off" | "low" | "mid" | "high" -> gain of the splash chord.
+pub fn splash_gain(setting: &str) -> f32 {
+    match setting {
+        "off" => 0.0,
+        "low" => 0.6,
+        "high" => 1.8,
+        _ => 1.1,
+    }
+}
+
+pub fn level_name(setting: &str) -> &'static str {
+    match setting {
+        "off" => "Выкл",
+        "low" => "Тихо",
+        "high" => "Громко",
+        _ => "Средне",
     }
 }

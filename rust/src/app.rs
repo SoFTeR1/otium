@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 mod calls;
 mod control;
+mod top;
 mod profile;
 pub use control::MixerPanel;
 mod edit;
@@ -29,6 +30,8 @@ use run::Launching;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Zone {
+    /// the top bar: index into `top_items()`
+    Top(usize),
     Row,
     Play,
     More,
@@ -72,6 +75,13 @@ pub struct App {
     art_searched: HashSet<String>,
     /// last sweep of images that are no longer drawn
     forget_at: Instant,
+    /// Control Center tile to come back to when what it opened is closed with B
+    cc_return: Option<usize>,
+    updates: top::Updates,
+    /// games found by the last search, for its results menu
+    search_hits: Vec<String>,
+    /// mouse wheel not yet turned into steps
+    wheel: f32,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
@@ -175,6 +185,10 @@ impl App {
             timer: Default::default(),
             art_searched: HashSet::new(),
             forget_at: Instant::now(),
+            cc_return: None,
+            updates: Default::default(),
+            search_hits: Vec::new(),
+            wheel: 0.0,
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
@@ -212,8 +226,9 @@ impl App {
         app.input.set_cal(app.lib.settings.get("padCal"));
         app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
-        if app.splash_start.is_some() && app.sounds_on() && !crate::tray::started_at_login() {
-            crate::sound::play(crate::sound::Sfx::Splash);
+        let gain = crate::sound::splash_gain(app.lib.setting_str("splashSound"));
+        if app.splash_start.is_some() && gain > 0.0 && !crate::tray::started_at_login() {
+            crate::sound::play_gain(crate::sound::Sfx::Splash, gain);
         }
         if !app.lib.setting_str("discordId").is_empty() {
             let id = app.lib.setting_str("discordId").to_string();
@@ -278,7 +293,9 @@ impl App {
 
     fn handle(&mut self, nav: Nav, frame: &eframe::Frame) {
         let before = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some());
+        let from_cc = matches!(self.modal, Some(Modal::Control { .. }));
         self.handle_nav(nav, frame);
+        self.after_control_center(nav, from_cc);
         if !self.sounds_on() {
             return;
         }
@@ -289,7 +306,7 @@ impl App {
             match nav {
                 Nav::Up | Nav::Down | Nav::Left | Nav::Right => Some(crate::sound::Sfx::Move),
                 Nav::Back if before != after || before.3 => Some(crate::sound::Sfx::Back),
-                Nav::Ok | Nav::Options | Nav::Add | Nav::Guide => Some(crate::sound::Sfx::Ok),
+                Nav::Ok | Nav::Options | Nav::Add | Nav::Guide | Nav::Menu => Some(crate::sound::Sfx::Ok),
                 _ => None,
             }
         };
@@ -308,6 +325,11 @@ impl App {
         }
         if self.call_menu_side(nav) {
             return;
+        }
+        // ≡ opens the settings from anywhere but the on-screen keyboard (there it means "done")
+        if nav == Nav::Menu && !matches!(self.modal, Some(Modal::Keyboard(_)) | Some(Modal::PadTest(_))) {
+            self.social.open = false;
+            return self.open_settings(crate::modal::SetMenu::Main, 0);
         }
         if matches!(self.modal, Some(Modal::Control { .. })) {
             return self.control_nav(nav);
@@ -334,7 +356,11 @@ impl App {
             return self.reorder_nav(nav);
         }
         let n = self.games.len();
+        if let Zone::Top(i) = self.zone {
+            return self.top_nav(i, nav);
+        }
         match (self.zone, nav) {
+            (Zone::Row, Nav::Up) => self.enter_top(),
             (Zone::Row, Nav::Left) if self.sel > 0 => self.select(self.sel - 1),
             (Zone::Row, Nav::Right) if self.sel + 1 < n => self.select(self.sel + 1),
             (Zone::Row, Nav::Down) if n > 0 => self.zone = Zone::Play,
@@ -636,6 +662,7 @@ impl eframe::App for App {
         }
         self.tick(ctx);
         self.tick_timer();
+        self.tick_updates();
         if self.forget_at.elapsed() > Duration::from_secs(5) && std::env::var("OTIUM_MEM_EXP").ok().as_deref() != Some("tour-keep") {
             self.forget_at = Instant::now();
             draw::forget_unused(ctx, Duration::from_secs(30));
@@ -672,7 +699,10 @@ impl eframe::App for App {
         let front = !self.away() && !(own != 0 && crate::win::is_minimized(own));
         self.input.focused = front;
         self.update_ambient(front);
-        let navs = self.input.poll(ctx);
+        let mut navs = self.input.poll(ctx);
+        if front {
+            navs.extend(self.mouse(ctx, frame));
+        }
         if self.input.test_mode {
             self.pad_test_tick();
             ctx.request_repaint();
@@ -813,6 +843,7 @@ impl App {
             (None, _) if self.calls.card_open() => vec![],
             (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
             (None, 0) if self.reorder => vec![(0, "Готово")],
+            (None, 0) if matches!(self.zone, Zone::Top(_)) => vec![(0, "Выбрать"), (1, "Назад")],
             (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
             (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
@@ -824,6 +855,9 @@ impl App {
             self.paint_call_card(ui, rect, s);
         }
         self.paint_hints(ui, rect, s, &hints);
+        if self.modal.is_none() && !self.social.open && self.pages.page == 0 && self.splash_start.is_none() {
+            self.paint_build_label(ui, rect, s);
+        }
 
         if let Some(m) = self.modal.as_mut() {
             let a = ease_out((self.modal_at.elapsed().as_secs_f32() / 0.18).min(1.0));
@@ -862,6 +896,7 @@ impl App {
             let fade = if d < -0.5 { (1.0 + d).max(0.0) } else { 1.0 } * appear;
             let covers = self.art.get(&g.id).map(|a| a.covers.as_slice()).unwrap_or(&[]);
             paint_tile(ui, g, covers, r, 14.0 * s, fade, i == self.sel && in_row, s);
+            crate::mouse::add(r, crate::mouse::Hit::Game(i));
         }
 
         let g = &self.games[self.sel];
@@ -907,6 +942,8 @@ impl App {
         p.text(btn.center(), Align2::CENTER_CENTER, if g.is_app() { "Открыть" } else { "Играть" }, semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
 
         let more = Rect::from_center_size(pos2(btn.right() + 24.0 * s + 34.0 * s, btn.center().y), vec2(68.0 * s, 68.0 * s));
+        crate::mouse::add(btn, crate::mouse::Hit::Play);
+        crate::mouse::add(more, crate::mouse::Hit::More);
         let more_focus = self.zone == Zone::More && no_modal;
         if more_focus {
             draw::glow(p, more, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
@@ -985,9 +1022,7 @@ impl App {
             p.circle_filled(b, 11.0 * s, Color32::from_rgb(237, 66, 69));
             p.text(b, Align2::CENTER_CENTER, unread.min(99).to_string(), semibold(13.0 * s), Color32::WHITE);
         }
-        if self.input.pad_connected {
-            p.text(pos2(av.x - 40.0 * s, y), Align2::RIGHT_CENTER, "🎮", font(24.0 * s), white(0.75 * a));
-        }
+        self.paint_top_items(ui, rect, s, a, av);
     }
 
     /// Hint bar: (button, label) where button 0 = confirm, 1 = back, 2 = options, 3 = add.

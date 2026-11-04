@@ -21,6 +21,8 @@ pub enum Nav {
     Options,
     Add,
     Guide,
+    /// Start / Menu (≡): the launcher's settings
+    Menu,
 }
 
 const REPEAT_DELAY: Duration = Duration::from_millis(380);
@@ -372,7 +374,8 @@ fn button_nav(b: Button) -> Option<Nav> {
     Some(match b {
         Button::South => Nav::Ok,
         Button::East => Nav::Back,
-        Button::North | Button::Start => Nav::Options,
+        Button::North => Nav::Options,
+        Button::Start => Nav::Menu,
         Button::West => Nav::Add,
         Button::Mode => Nav::Guide,
         _ => return None,

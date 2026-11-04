@@ -306,6 +306,9 @@ impl App {
             Event::TrophyCheck { appid, since, res } => self.on_trophy_check(&appid, since, res),
             Event::PublicArt { id, name, url } => self.on_public_art(&id, &name, url),
             Event::SteamFriends(res) => self.on_steam_friends(res),
+            Event::UpdateFound(r) => self.on_update_found(r),
+            Event::UpdateProgress(pc) => self.updates.progress = Some(pc),
+            Event::UpdateReady(res) => self.on_update_ready(res),
             e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }

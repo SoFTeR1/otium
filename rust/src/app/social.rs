@@ -849,6 +849,7 @@ impl App {
             }
             let r = Rect::from_min_size(pos2(left.left(), y), vec2(left.width(), height(it) - 8.0 * s));
             y += height(it);
+            crate::mouse::add(r.intersect(left), crate::mouse::Hit::Social(i));
             if r.bottom() < left.top() || r.top() > left.bottom() {
                 continue;
             }
@@ -1193,5 +1194,13 @@ impl App {
             self.social.idx = i;
             DONE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+    }
+}
+
+impl App {
+    /// The mouse is over an entry of the friends list.
+    pub(super) fn social_hover(&mut self, i: usize) {
+        self.social.idx = i;
+        self.social.zone = Zone::List;
     }
 }

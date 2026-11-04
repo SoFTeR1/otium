@@ -1,6 +1,6 @@
 [package]
 name = "otium"
-version = "3.0.0-alpha.9"
+version = "3.0.0"
 edition = "2021"
 build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"

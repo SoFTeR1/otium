@@ -27,6 +27,12 @@ pub enum Event {
     FeedDone { appid: String },
     /// achievements of a Steam game that just closed, to announce new trophies (`since` = unix ms)
     TrophyCheck { appid: String, since: f64, res: Result<crate::steam_api::Trophies, crate::steam_api::ApiError> },
+    /// result of looking for a newer release on GitHub
+    UpdateFound(Option<crate::update::Release>),
+    /// downloading the update: percent
+    UpdateProgress(u8),
+    /// the update's installer is downloaded (its path) or failed
+    UpdateReady(Result<String, String>),
     /// the Steam friend list arrived
     SteamFriends(Result<Vec<crate::steam_api::SteamFriend>, crate::steam_api::ApiError>),
     /// public art found for a game, for the Discord status ("" = nothing fits)

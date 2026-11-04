@@ -160,6 +160,12 @@ impl MixerPanel {
         }
     }
 
+    pub fn set_focus(&mut self, i: usize) {
+        if i < self.rows.len() {
+            self.focus = i;
+        }
+    }
+
     fn nav(&mut self, nav: Nav) {
         let n = self.rows.len();
         let Some(r) = self.rows.get_mut(self.focus) else { return };
@@ -347,7 +353,32 @@ impl App {
         }
     }
 
+    /// Something opened from the Control Center (settings, power, the timer, the call menu, the
+    /// friends panel) goes back to it on B, like on the console; anything else ends that.
+    pub(super) fn after_control_center(&mut self, nav: Nav, was_cc: bool) {
+        let cc_open = matches!(self.modal, Some(Modal::Control { .. }));
+        let elsewhere = self.modal.is_some() || self.social.open;
+        if was_cc && !cc_open && elsewhere {
+            // left the Control Center for a menu or panel: remember which tile
+            return;
+        }
+        if cc_open || !elsewhere {
+            if nav == Nav::Back && !cc_open {
+                if let Some(focus) = self.cc_return.take() {
+                    let _ = self.media_tx.send(MediaCmd::Poll);
+                    self.open(Modal::Control { focus, scroll: 0.0, mixer: None });
+                }
+            }
+            if !matches!(self.modal, Some(Modal::Control { .. })) {
+                self.cc_return = None;
+            }
+        }
+    }
+
     pub(super) fn control(&mut self, c: CtlAction) {
+        if let Some(Modal::Control { focus, .. }) = &self.modal {
+            self.cc_return = Some(*focus);
+        }
         let close = |app: &mut App| app.modal = None;
         match c {
             CtlAction::ReturnToGame => self.back_to_game(),
@@ -580,6 +611,7 @@ impl App {
                     continue;
                 }
                 paint_tile(ui, t, r, s, i == *focus && mixer.is_none(), appear);
+                crate::mouse::add(r, crate::mouse::Hit::Cc(i));
             }
             mixer_x = mx;
         }
@@ -697,6 +729,7 @@ fn paint_mixer(ui: &egui::Ui, rect: Rect, s: f32, dt: f32, a: f32, m: &mut Mixer
             continue;
         }
         let row = Rect::from_min_size(pos2(list.left(), y), vec2(list.width(), MIX_ROW * s - 4.0 * s));
+        crate::mouse::add(row.intersect(list), crate::mouse::Hit::Mixer(i));
         if i == m.focus {
             clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(0.12 * a));
             clip.rect_stroke(row, CornerRadius::same((12.0 * s) as u8), Stroke::new(1.5_f32, white(0.5 * a)), StrokeKind::Inside);

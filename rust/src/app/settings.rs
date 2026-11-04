@@ -75,11 +75,12 @@ impl App {
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
                         item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { crate::ambient::level_name(s.setting_str("ambient")) } else { "нет в этой сборке" }),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
+                        item(SetKey::SplashSound, "Звук заставки", crate::sound::level_name(s.setting_str("splashSound"))),
                         item(SetKey::Fullscreen, "Полноэкранный режим", onoff(self.fullscreen)),
                         item(SetKey::Autostart, "Запускать вместе с Windows", onoff(s.setting_bool("autostart", false))),
                         item(SetKey::Tray, "При закрытии окна", if s.setting_bool("closeToTray", true) { "Свернуть в трей" } else { "Выйти" }),
                         danger(SetKey::Power, "Питание", "сон, перезагрузка, выключение"),
-                        item(SetKey::Version, "Версия", env!("CARGO_PKG_VERSION")),
+                        item(SetKey::Version, "Версия", self.version_value()),
                     ],
                 )
             }
@@ -130,6 +131,8 @@ impl App {
             SetMenu::Profile | SetMenu::Friend | SetMenu::Call | SetMenu::Group => return,
             SetMenu::Edit => return self.open_editor(focus),
             SetMenu::Timer => self.timer_items(),
+            // built by search_text
+            SetMenu::Search => return,
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -173,6 +176,9 @@ impl App {
         if menu == SetMenu::Timer {
             return self.timer_setting(key, focus);
         }
+        if menu == SetMenu::Search {
+            return self.search_pick(focus);
+        }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
             order[(i + 1) % order.len()].to_string()
@@ -209,6 +215,20 @@ impl App {
             SetKey::Layout => {
                 let next = cycle(self.lib.setting_str("padLayout"), &["auto", "ps", "xbox"]);
                 self.set("padLayout", next);
+            }
+            SetKey::SplashSound => {
+                let cur = match self.lib.setting_str("splashSound") {
+                    "" => "mid",
+                    x => x,
+                }
+                .to_string();
+                let next = cycle(&cur, &["off", "low", "mid", "high"]);
+                // let the new level be heard
+                let gain = crate::sound::splash_gain(&next);
+                if gain > 0.0 {
+                    crate::sound::play_gain(crate::sound::Sfx::Splash, gain);
+                }
+                self.set("splashSound", next);
             }
             SetKey::Ambient => {
                 if crate::ambient::available() {
@@ -247,7 +267,12 @@ impl App {
                 let v = !self.lib.setting_bool("closeToTray", true);
                 self.set("closeToTray", v);
             }
-            SetKey::Version => {}
+            SetKey::Version => {
+                if self.updates.avail.is_some() {
+                    return self.start_update();
+                }
+                self.check_updates(true);
+            }
             SetKey::ProfileCode
             | SetKey::ProfileRename
             | SetKey::ProfileKey
@@ -256,6 +281,7 @@ impl App {
             | SetKey::FriendRemove
             | SetKey::FriendCall
             | SetKey::FriendProfile
+            | SetKey::SearchHit
             | SetKey::CallMute
             | SetKey::CallDeafen
             | SetKey::CallVolume
@@ -379,6 +405,10 @@ impl App {
                 self.modal = None;
                 return;
             }
+            if self.last_text_target == Some(Target::Search) {
+                self.modal = None;
+                return;
+            }
             if let Some(t @ (Target::GameName | Target::GamePath | Target::GameArgs)) = self.last_text_target {
                 return self.edit_text_cancelled(t);
             }
@@ -393,6 +423,9 @@ impl App {
         }
         if target == Target::Timer {
             return self.timer_text(&text);
+        }
+        if target == Target::Search {
+            return self.search_text(&text);
         }
         if matches!(target, Target::GameName | Target::GamePath | Target::GameArgs) {
             return self.edit_text(target, text);

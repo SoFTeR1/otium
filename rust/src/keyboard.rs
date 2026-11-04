@@ -22,6 +22,7 @@ pub enum Target {
     GamePath,
     GameArgs,
     Timer,
+    Search,
 }
 
 impl Target {
@@ -156,6 +157,8 @@ impl Keyboard {
             Nav::Back => return Some(Outcome::Cancel),
             Nav::Add => self.erase(),
             Nav::Options => self.type_text(" "),
+            // Start = done, like on a console keyboard
+            Nav::Menu => return Some(self.finish()),
             Nav::Ok => match rows[self.row][self.col.min(n - 1)] {
                 Key::Char(c) => {
                     self.type_text(&c.to_string());
