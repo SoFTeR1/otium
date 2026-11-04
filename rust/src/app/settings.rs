@@ -73,6 +73,7 @@ impl App {
                         item(SetKey::Layout, "Кнопки геймпада", layout),
                         item(SetKey::PadTest, "Геймпад: проверка и калибровка", pad),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
+                        item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { crate::ambient::level_name(s.setting_str("ambient")) } else { "нет в этой сборке" }),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
                         item(SetKey::Fullscreen, "Полноэкранный режим", onoff(self.fullscreen)),
                         item(SetKey::Autostart, "Запускать вместе с Windows", onoff(s.setting_bool("autostart", false))),
@@ -208,6 +209,17 @@ impl App {
             SetKey::Layout => {
                 let next = cycle(self.lib.setting_str("padLayout"), &["auto", "ps", "xbox"]);
                 self.set("padLayout", next);
+            }
+            SetKey::Ambient => {
+                if crate::ambient::available() {
+                    let cur = match self.lib.setting_str("ambient") {
+                        "" => "mid",
+                        x => x,
+                    }
+                    .to_string();
+                    let next = cycle(&cur, &["off", "low", "mid", "high"]);
+                    self.set("ambient", next);
+                }
             }
             SetKey::Sounds => {
                 let v = !self.sounds_on();

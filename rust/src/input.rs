@@ -124,6 +124,9 @@ pub struct PadState {
 }
 
 pub struct Input {
+    /// OTIUM is the window in front: otherwise pad presses belong to the game or the desktop and
+    /// are read and dropped (the Guide button is caught globally elsewhere)
+    pub focused: bool,
     gilrs: Option<Gilrs>,
     held: Option<(Nav, Instant, Instant)>,
     pub pad_kind: PadKind,
@@ -147,6 +150,7 @@ impl Input {
             pad_connected: false,
             text_mode: false,
             test_mode: false,
+            focused: true,
             cal: HashMap::new(),
             active: None,
         };
@@ -298,7 +302,7 @@ impl Input {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
                     active = Some(ev.id);
-                    if let Some(n) = button_nav(b).filter(|_| !self.test_mode) {
+                    if let Some(n) = button_nav(b).filter(|_| !self.test_mode && self.focused) {
                         out.push(n);
                     }
                 }
@@ -311,7 +315,7 @@ impl Input {
         if changed {
             self.detect_pad();
         }
-        if self.test_mode {
+        if self.test_mode || !self.focused {
             self.held = None;
             return out;
         }

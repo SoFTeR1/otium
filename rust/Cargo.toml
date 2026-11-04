@@ -1,7 +1,8 @@
 [package]
 name = "otium"
-version = "3.0.0-alpha.7"
+version = "3.0.0-alpha.8"
 edition = "2021"
+build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
 authors = ["SoFTeR1"]
 publish = false
@@ -44,7 +45,7 @@ windows = { version = "0.58", features = [
 ] }
 ureq = { version = "2", features = ["json"] }
 regex = "1"
-rodio = { version = "0.19", default-features = false }
+rodio = { version = "0.19", default-features = false, features = ["vorbis", "symphonia-mp3"] }
 tray-icon = "0.19"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 nostr-sdk = "0.45"

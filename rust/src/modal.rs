@@ -54,6 +54,7 @@ pub enum SetKey {
     Sort,
     Layout,
     Sounds,
+    Ambient,
     Splash,
     Fullscreen,
     Autostart,

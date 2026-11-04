@@ -504,6 +504,22 @@ impl App {
         self.start_launch(game);
     }
 
+    /// Background music: only while OTIUM is in front and nothing else should be heard — not during
+    /// the splash (it has its own chord), a game launch, calls, or music already playing in Windows.
+    fn update_ambient(&self, front: bool) {
+        if !crate::ambient::available() {
+            return;
+        }
+        let setting = self.lib.setting_str("ambient");
+        let busy = self.splash_start.is_some()
+            || self.launching.is_some()
+            || self.calls.call.state != crate::app::calls::CallState::Idle
+            || self.calls.room.is_some()
+            || self.calls.ring.is_some()
+            || self.pages.music.as_ref().is_some_and(|m| m.playing);
+        crate::ambient::set(front && !busy, crate::ambient::level(setting));
+    }
+
     fn toast(&mut self, text: &str, error: bool) {
         if self.away() {
             return self.overlay.toast("OTIUM", text, None, error);
@@ -632,6 +648,10 @@ impl eframe::App for App {
             self.type_from_keyboard(ctx);
         }
         self.input.test_mode = matches!(self.modal, Some(Modal::PadTest(_)));
+        let own = self.own.load(Ordering::Relaxed);
+        let front = !self.away() && !(own != 0 && crate::win::is_minimized(own));
+        self.input.focused = front;
+        self.update_ambient(front);
         let navs = self.input.poll(ctx);
         if self.input.test_mode {
             self.pad_test_tick();

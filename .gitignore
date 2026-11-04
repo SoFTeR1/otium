@@ -6,3 +6,7 @@ build/preview-*.png
 build/icon-preview.png
 
 rust/target/
+
+# background music is built into the exe, the file itself stays local
+rust/assets/ambient.ogg
+rust/assets/ambient.mp3

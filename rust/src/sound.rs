@@ -6,6 +6,8 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
 
 const RATE: u32 = 44_100;
+/// the splash chord used to come out at 2.0 and was far too loud next to the UI sounds (-9 dB)
+const SPLASH_GAIN: f32 = 0.7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sfx {
@@ -241,8 +243,8 @@ fn splash() -> Vec<f32> {
     let wet_r = reverb(&dry, &[1580, 1640, 1514, 1445], &[248, 579]);
     let mut out = Vec::with_capacity(n * 2);
     for i in 0..n {
-        out.push(0.8 * (dry[i] + 0.6 * wet_l[i]) * 2.0);
-        out.push(0.8 * (dry[i] + 0.6 * wet_r[i]) * 2.0);
+        out.push(0.8 * (dry[i] + 0.6 * wet_l[i]) * SPLASH_GAIN);
+        out.push(0.8 * (dry[i] + 0.6 * wet_r[i]) * SPLASH_GAIN);
     }
     out
 }
