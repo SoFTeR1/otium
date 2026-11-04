@@ -503,6 +503,8 @@ body.cc-open .toasts { bottom: 200px; }
 .playing i { width: 8px; height: 8px; border-radius: 50%; background: #5be38a; box-shadow: 0 0 10px #5be38a; flex: 0 0 auto; animation: blink 2s ease-in-out infinite; }
 .playing span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .playing.hidden { display: none; }
+.sleepchip { padding: 6px 12px; border-radius: 999px; background: rgba(255, 170, 60, 0.15); color: #ffc36b; font-size: clamp(12px, 0.8vw, 15px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sleepchip.hidden { display: none; }
 
 /* ---------- Volume mixer ---------- */
 .mixer {

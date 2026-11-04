@@ -257,9 +257,106 @@ ipc.onSteamRunning(({ prev, at }) => {
   }, 10000);
 });
 
+// ---------- shutdown timer ----------
+const sleepTimer = { at: 0, action: 'shutdown', warned: {} };
+const timerLeft = () => Math.max(0, sleepTimer.at - Date.now());
+function fmtLeft(ms) {
+  const s = Math.ceil(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`;
+}
+function setSleepTimer(minutes) {
+  sleepTimer.at = Date.now() + minutes * 60e3;
+  sleepTimer.warned = {};
+  const what = sleepTimer.action === 'sleep' ? 'перейдёт в сон' : 'выключится';
+  const at = new Date(sleepTimer.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  toast(`ПК ${what} в ${at} (через ${fmtLeft(minutes * 60e3)})`, false, { title: 'Таймер выключения', icon: '⏻' });
+  tickSleepTimer();
+}
+function cancelSleepTimer(silent) {
+  sleepTimer.at = 0;
+  tickSleepTimer();
+  if (!silent) toast('Таймер выключения отменён', false, { title: 'Таймер', icon: '⏻' });
+}
+function tickSleepTimer() {
+  const chip = $('#sleepChip');
+  if (!sleepTimer.at) { chip.classList.add('hidden'); return; }
+  const left = timerLeft();
+  chip.classList.remove('hidden');
+  $('span', chip).textContent = fmtLeft(left);
+  const what = sleepTimer.action === 'sleep' ? 'перейдёт в сон' : 'выключится';
+  for (const [min, label] of [[5, '5 минут'], [1, '1 минуту']]) {
+    if (left <= min * 60e3 && !sleepTimer.warned[min]) {
+      sleepTimer.warned[min] = true;
+      toast(`ПК ${what} через ${label}. Отменить — Питание → Таймер выключения`, false, { title: 'Таймер выключения', icon: '⏻', ms: 9000 });
+    }
+  }
+  if (left <= 0) {
+    const action = sleepTimer.action;
+    cancelSleepTimer(true);
+    powerCountdown(action === 'sleep' ? 'sleep' : 'shutdown');
+  }
+}
+setInterval(tickSleepTimer, 1000);
+
+function openSleepTimer(focus = 0) {
+  const active = !!sleepTimer.at;
+  const presets = [[30, '30 минут'], [60, '1 час'], [90, '1,5 часа'], [120, '2 часа']];
+  openModal(`<h2 style="padding:10px 18px 0">Таймер выключения</h2>
+    ${active ? `<div class="meta" style="padding:4px 18px 8px"><span>Осталось ${fmtLeft(timerLeft())} — ПК ${sleepTimer.action === 'sleep' ? 'перейдёт в сон' : 'выключится'} в ${new Date(sleepTimer.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}
+    ${presets.map(([m, l]) => `<button class="menu-item focusable" data-m="${m}">${POWER_ICONS.timer}Через ${l}</button>`).join('')}
+    <button class="menu-item focusable" data-m="custom">${POWER_ICONS.timer}Своё время…</button>
+    <div class="menu-sep"></div>
+    <button class="menu-item focusable" data-m="action">Действие<span class="val">${sleepTimer.action === 'sleep' ? 'Спящий режим' : 'Выключить ПК'}</span></button>
+    ${active ? '<button class="menu-item focusable danger" data-m="cancel">Отменить таймер</button>' : ''}`, { cls: 'menu', focus, onBack: openPower });
+  $$('#modal .menu-item').forEach((b, i) => (b.onclick = () => {
+    const m = b.dataset.m;
+    if (m === 'action') { sleepTimer.action = sleepTimer.action === 'sleep' ? 'shutdown' : 'sleep'; return openSleepTimer(i); }
+    if (m === 'cancel') { closeModal(); return cancelSleepTimer(); }
+    if (m === 'custom') return openCustomTimer();
+    closeModal();
+    setSleepTimer(+m);
+  }));
+}
+
+// "45" = in 45 minutes, "1:30" = in 1 h 30 min, "23:30" = at 23:30 (today or tomorrow)
+function parseTimerInput(v) {
+  v = v.trim().replace(/[.,\s]/g, ':');
+  if (/^\d{1,4}$/.test(v)) return +v;
+  const m = v.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = +m[1];
+  const mm = +m[2];
+  if (mm > 59) return null;
+  // one-digit hours ("1:30") mean a duration; two digits ("01:30", "23:30") mean a clock time
+  if (m[1].length === 1) return hh * 60 + mm;
+  if (hh > 23) return null;
+  const at = new Date();
+  at.setHours(hh, mm, 0, 0);
+  if (at <= new Date()) at.setDate(at.getDate() + 1);
+  return Math.round((at - Date.now()) / 60e3);
+}
+function openCustomTimer() {
+  openModal(`<h2>Своё время</h2>
+    <div class="field"><label>Через сколько минут или во сколько</label><input class="focusable" id="fTimer" placeholder="например 45 или 23:30"/>
+      <div class="hint">45 — через 45 минут · 1:30 — через полтора часа · 23:30 — в 23:30</div></div>
+    <div class="buttons"><button class="btn focusable" id="bNo">Назад</button><button class="btn primary focusable" id="bYes">Запустить таймер</button></div>`,
+  { onBack: () => openSleepTimer() });
+  $('#bNo').onclick = () => openSleepTimer();
+  $('#bYes').onclick = () => {
+    const min = parseTimerInput($('#fTimer').value);
+    if (!min || min < 1 || min > 24 * 60) return toast('Не понял время — введите минуты (45) или время (23:30)', true);
+    closeModal();
+    setSleepTimer(min);
+  };
+}
+
 // ---------- power ----------
 function openPower() {
   openModal(`<h2 style="padding:10px 18px 0">Питание</h2>
+    <button class="menu-item focusable" data-p="timer">${POWER_ICONS.timer}Таймер выключения<span class="val">${sleepTimer.at ? fmtLeft(timerLeft()) : ''}</span></button>
     <button class="menu-item focusable" data-p="sleep">${POWER_ICONS.sleep}Спящий режим</button>
     <button class="menu-item focusable" data-p="restart">${POWER_ICONS.restart}Перезагрузить ПК</button>
     <button class="menu-item focusable danger" data-p="shutdown">${POWER_ICONS.off}Выключить ПК</button>
@@ -267,6 +364,7 @@ function openPower() {
     <button class="menu-item focusable" data-p="quit">Выйти из лаунчера</button>`, { cls: 'menu' });
   $$('#modal .menu-item').forEach((b) => (b.onclick = () => {
     const p = b.dataset.p;
+    if (p === 'timer') return openSleepTimer();
     if (p === 'shutdown' || p === 'restart') return powerCountdown(p);
     closeModal();
     ipc.power(p);
@@ -274,7 +372,7 @@ function openPower() {
 }
 function powerCountdown(action) {
   let left = 10;
-  const label = action === 'shutdown' ? 'Выключение' : 'Перезагрузка';
+  const label = { shutdown: 'Выключение', restart: 'Перезагрузка', sleep: 'Спящий режим' }[action];
   const draw = () => {
     openModal(`<h2>${label} через ${left}…</h2>
       <div class="meta"><span>Несохранённый прогресс в играх может быть потерян.</span></div>
@@ -289,6 +387,7 @@ function powerCountdown(action) {
   draw();
 }
 const POWER_ICONS = {
+  timer: '<svg class="mi" viewBox="0 0 24 24"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4c-.4-.5-.9-1-1.4-1.4L17.6 6A9 9 0 1 0 19 7.4zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>',
   sleep: '<svg class="mi" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>',
   restart: '<svg class="mi" viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.8-4.3L14 10h6V4l-2.3 2.3A8 8 0 0 0 12 4z"/></svg>',
   off: '<svg class="mi" viewBox="0 0 24 24"><path d="M11 2h2v10h-2zm6.4 3.2 1.4 1.4A8 8 0 1 1 5.2 6.6l1.4-1.4A6 6 0 1 0 17.4 5.2z"/></svg>'
