@@ -305,6 +305,7 @@ impl App {
             Event::Voice(v) => self.on_voice(v),
             Event::TrophyCheck { appid, since, res } => self.on_trophy_check(&appid, since, res),
             Event::PublicArt { id, name, url } => self.on_public_art(&id, &name, url),
+            Event::SteamFriends(res) => self.on_steam_friends(res),
             e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }

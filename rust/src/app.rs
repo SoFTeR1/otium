@@ -615,6 +615,7 @@ impl eframe::App for App {
         self.tick(ctx);
         self.tick_timer();
         self.debug_open_profile();
+        self.debug_open_social();
         self.tick_pages();
         self.social_tick();
         self.calls_tick();
@@ -924,7 +925,9 @@ impl App {
         let y = 62.0 * s;
         let x = 96.0 * s;
         let games = p.text(pos2(x, y), Align2::LEFT_CENTER, "Игры", semibold(30.0 * s), white(a));
-        p.text(pos2(games.right() + 36.0 * s, y), Align2::LEFT_CENTER, "Медиа", semibold(30.0 * s), white(0.5 * a));
+        // not ready yet: shown locked
+        let media = p.text(pos2(games.right() + 36.0 * s, y), Align2::LEFT_CENTER, "Медиа", semibold(30.0 * s), white(0.35 * a));
+        p.text(pos2(media.right() + 10.0 * s, y + 1.0 * s), Align2::LEFT_CENTER, draw::ic::LOCK, draw::icon(20.0 * s), white(0.35 * a));
 
         let right = rect.right() - 96.0 * s;
         let clock = chrono::Local::now().format("%H:%M").to_string();

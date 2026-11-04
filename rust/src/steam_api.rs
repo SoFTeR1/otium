@@ -405,3 +405,65 @@ mod art_tests {
         }
     }
 }
+
+// ---------- Steam friends ----------
+
+#[derive(Debug, Clone)]
+pub struct SteamFriend {
+    pub id: String,
+    pub name: String,
+    pub avatar: Option<String>,
+    /// 0 offline, 1 online, 2 busy, 3 away, 4 snooze, 5 looking to trade, 6 looking to play
+    pub state: u8,
+    pub game: Option<String>,
+    pub game_id: Option<String>,
+}
+
+impl SteamFriend {
+    pub fn online(&self) -> bool {
+        self.state > 0 || self.game.is_some()
+    }
+
+    pub fn status(&self) -> String {
+        match (&self.game, self.state) {
+            (Some(g), _) => format!("В игре: {g}"),
+            (None, 1) | (None, 5) | (None, 6) => "В сети".into(),
+            (None, 2) => "Не беспокоить".into(),
+            (None, 0) => "Не в сети".into(),
+            _ => "Нет на месте".into(),
+        }
+    }
+}
+
+/// The player's Steam friends (needs their friend list to be public), first 100, in game first,
+/// then online, then by name.
+pub fn friends(key: &str, steam_id: &str) -> Result<Vec<SteamFriend>, ApiError> {
+    let (status, fl) = probe(&format!("https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key={key}&steamid={steam_id}&relationship=friend"));
+    match status {
+        0 => return Err(ApiError::Network),
+        401 => return Err(ApiError::Private),
+        403 => return Err(ApiError::BadKey),
+        200 => {}
+        _ => return Err(ApiError::Other),
+    }
+    let ids: Vec<String> = fl["friendslist"]["friends"].as_array().into_iter().flatten().filter_map(|f| f["steamid"].as_str().map(str::to_string)).take(100).collect();
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let s = json(&format!("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={key}&steamids={}", ids.join(","))).ok_or(ApiError::Network)?;
+    let mut list: Vec<SteamFriend> = s["response"]["players"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| SteamFriend {
+            id: p["steamid"].as_str().unwrap_or("").to_string(),
+            name: p["personaname"].as_str().unwrap_or("").to_string(),
+            avatar: p["avatarfull"].as_str().or(p["avatarmedium"].as_str()).map(str::to_string),
+            state: p["personastate"].as_u64().unwrap_or(0) as u8,
+            game: p["gameextrainfo"].as_str().map(str::to_string),
+            game_id: p["gameid"].as_str().map(str::to_string),
+        })
+        .collect();
+    list.sort_by(|a, b| b.game.is_some().cmp(&a.game.is_some()).then(b.online().cmp(&a.online())).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(list)
+}

@@ -24,14 +24,18 @@ enum Zone {
     Chat,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 enum Item {
     Me,
     Find,
     NewGroup,
     Request(String),
     Group(String),
+    /// a foldable header: "Друзья OTIUM" (false) or "Друзья Steam" (true)
+    Section(bool),
     Friend(String),
+    /// a Steam friend by SteamID64
+    SteamFriend(String),
 }
 
 pub struct Social {
@@ -55,6 +59,11 @@ pub struct Social {
     login_pending: Option<String>,
     /// the parsed account; library.json holds the source of truth, this saves re-parsing every frame
     cache: std::cell::RefCell<Option<Option<Account>>>,
+    /// Steam friends (Web API), refreshed every minute while the panel is open
+    steam: Vec<crate::steam_api::SteamFriend>,
+    steam_err: Option<crate::steam_api::ApiError>,
+    steam_at: Option<Instant>,
+    steam_loading: bool,
 }
 
 impl Social {
@@ -116,6 +125,10 @@ impl Social {
             menu_pk: None,
             login_pending: None,
             cache: Default::default(),
+            steam: Vec::new(),
+            steam_err: None,
+            steam_at: None,
+            steam_loading: false,
         }
     }
 }
@@ -177,6 +190,16 @@ impl App {
     }
 
     pub(super) fn social_tick(&mut self) {
+        let stale = self.social.steam_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
+        if self.social.open && stale && !self.social.steam_loading {
+            let (key, user) = (self.steam_key(), self.steam_user());
+            if !key.is_empty() && !user.is_empty() {
+                self.social.steam_loading = true;
+                self.social.steam_at = Some(Instant::now());
+                let bus = self.bus.clone();
+                std::thread::spawn(move || bus.send(crate::watch::Event::SteamFriends(crate::steam_api::friends(&key, &user))));
+            }
+        }
         if self.social.save_at.is_some_and(|t| Instant::now() >= t) {
             self.social.save_at = None;
             self.save();
@@ -445,6 +468,20 @@ impl App {
             self.in_room(&y.id).len().cmp(&self.in_room(&x.id).len()).then(a.group_unread(y, &me).cmp(&a.group_unread(x, &me))).then(last_at(y).cmp(&last_at(x)))
         });
         items.extend(gs.into_iter().map(|g| Item::Group(g.id)));
+        items.push(Item::Section(false));
+        if !self.section_folded(false) {
+            items.extend(self.otium_friends(a));
+        }
+        items.push(Item::Section(true));
+        if !self.section_folded(true) {
+            items.extend(self.social.steam.iter().map(|f| Item::SteamFriend(f.id.clone())));
+        }
+        items
+    }
+
+    fn otium_friends(&self, a: &Account) -> Vec<Item> {
+        let me = self.social.me.clone().unwrap_or_default();
+        let mut items = Vec::new();
         let mut fr: Vec<&Friend> = a.friends.iter().collect();
         fr.sort_by(|x, y| {
             let (px, py) = (self.presence_of(&x.pk).0, self.presence_of(&y.pk).0);
@@ -473,6 +510,9 @@ impl App {
         };
         let items = self.items(&a);
         self.social.idx = self.social.idx.min(items.len().saturating_sub(1));
+        if std::env::var_os("OTIUM_NO_OPEN").is_some() {
+            eprintln!("social focus {:?}", items.get(self.social.idx));
+        }
         match self.social.zone {
             Zone::List => match nav {
                 Nav::Back => self.social.open = false,
@@ -482,6 +522,7 @@ impl App {
                 Nav::Ok => self.activate(&a, items[self.social.idx].clone()),
                 Nav::Options => match &items[self.social.idx] {
                     Item::Friend(pk) => self.open_friend_menu(&a, pk),
+                    Item::SteamFriend(id) => open_external(&format!("https://steamcommunity.com/profiles/{id}")),
                     Item::Group(gid) => self.open_group_menu(gid),
                     _ => {}
                 },
@@ -537,6 +578,12 @@ impl App {
                 let name = self.display_name(a, &pk);
                 self.open(Modal::FriendRequest { pk, name, focus: 1 });
             }
+            Item::Section(true) if self.steam_key().is_empty() || self.steam_user().is_empty() => {
+                // nothing to show without the Steam Web API key: that's where it's set
+                self.open_settings(crate::modal::SetMenu::Account, 0);
+            }
+            Item::Section(steam) => self.fold_section(steam),
+            Item::SteamFriend(id) => open_external(&format!("steam://friends/message/{id}")),
             Item::Friend(pk) => {
                 self.social.chat = Some(pk.clone());
                 self.social.zone = Zone::Chat;
@@ -780,11 +827,12 @@ impl App {
         let row_h = 76.0 * s;
         let mut y = left.top();
         let list_focus = self.social.zone == Zone::List && self.modal.is_none();
-        let online = a.friends.iter().filter(|f| self.presence_of(&f.pk).0).count();
-        let mut header_done = (false, false, false);
+        let mut header_done = (false, false);
         let groups = a.groups();
+        let section_h = 64.0 * s;
+        let height = |it: &Item| if matches!(it, Item::Section(_)) { section_h } else { row_h };
         // scroll the list so the focused row stays visible
-        let focus_y = self.social.idx as f32 * row_h + 80.0 * s;
+        let focus_y: f32 = items.iter().take(self.social.idx).map(height).sum::<f32>() + 80.0 * s;
         let offset = (focus_y - (left.height() - row_h * 2.0)).max(0.0);
         let clip = p.with_clip_rect(left);
         y -= offset;
@@ -794,18 +842,13 @@ impl App {
                 clip.text(pos2(left.left() + 8.0 * s, y + 18.0 * s), Align2::LEFT_CENTER, "Заявки", semibold(17.0 * s), white(0.5));
                 y += 36.0 * s;
             }
-            if matches!(it, Item::Group(_)) && !header_done.2 {
-                header_done.2 = true;
+            if matches!(it, Item::Group(_)) && !header_done.1 {
+                header_done.1 = true;
                 clip.text(pos2(left.left() + 8.0 * s, y + 18.0 * s), Align2::LEFT_CENTER, "Группы", semibold(17.0 * s), white(0.5));
                 y += 36.0 * s;
             }
-            if matches!(it, Item::Friend(_)) && !header_done.1 {
-                header_done.1 = true;
-                clip.text(pos2(left.left() + 8.0 * s, y + 18.0 * s), Align2::LEFT_CENTER, format!("Друзья · {online} в сети"), semibold(17.0 * s), white(0.5));
-                y += 36.0 * s;
-            }
-            let r = Rect::from_min_size(pos2(left.left(), y), vec2(left.width(), row_h - 8.0 * s));
-            y += row_h;
+            let r = Rect::from_min_size(pos2(left.left(), y), vec2(left.width(), height(it) - 8.0 * s));
+            y += height(it);
             if r.bottom() < left.top() || r.top() > left.bottom() {
                 continue;
             }
@@ -867,6 +910,28 @@ impl App {
                     clip.text(pos2(tx, r.center().y - 11.0 * s), Align2::LEFT_CENTER, &name, semibold(21.0 * s), fg);
                     clip.text(pos2(tx, r.center().y + 13.0 * s), Align2::LEFT_CENTER, "Заявка в друзья", font(16.0 * s), if f { BLUE } else { Color32::from_rgb(120, 160, 255) });
                 }
+                Item::Section(steam) => {
+                    let (title, sub) = self.section_label(&a, *steam);
+                    clip.text(pos2(r.left() + 16.0 * s, r.center().y), Align2::LEFT_CENTER, title, semibold(19.0 * s), if f { fg } else { white(0.7) });
+                    clip.text(pos2(r.right() - 16.0 * s, r.center().y), Align2::RIGHT_CENTER, sub, font(15.0 * s), fg.gamma_multiply(0.55));
+                }
+                Item::SteamFriend(id) => {
+                    let Some(sf) = self.social.steam.iter().find(|x| &x.id == id) else { continue };
+                    let pic = Rect::from_center_size(av, vec2(48.0 * s, 48.0 * s));
+                    let shown = sf.avatar.as_ref().filter(|_| left.contains_rect(pic)).is_some_and(|u| draw::cover(ui, &[u.clone()], pic, 24.0 * s, Color32::WHITE, (0.5, 0.5)));
+                    if !shown {
+                        avatar(&clip, av, 24.0 * s, &sf.id, &sf.name);
+                    }
+                    if sf.online() {
+                        let dot = av + vec2(17.0 * s, 17.0 * s);
+                        clip.circle_filled(dot, 7.0 * s, if f { Color32::WHITE } else { Color32::from_rgb(8, 10, 16) });
+                        clip.circle_filled(dot, 5.0 * s, if sf.game.is_some() { BLUE } else { GREEN });
+                    }
+                    clip.text(pos2(tx, r.center().y - 11.0 * s), Align2::LEFT_CENTER, &sf.name, semibold(21.0 * s), fg);
+                    let sub_color = if sf.game.is_some() { if f { BLUE } else { Color32::from_rgb(120, 160, 255) } } else { fg.gamma_multiply(0.6) };
+                    clip.text(pos2(tx, r.center().y + 13.0 * s), Align2::LEFT_CENTER, sf.status(), font(16.0 * s), sub_color);
+                    clip.text(pos2(r.right() - 22.0 * s, r.center().y), Align2::RIGHT_CENTER, "Steam", font(13.0 * s), fg.gamma_multiply(0.4));
+                }
                 Item::Friend(pk) => {
                     let name = self.display_name(&a, pk);
                     let (on, text, game) = self.presence_of(pk);
@@ -888,13 +953,13 @@ impl App {
                 }
             }
         }
-        if a.friends.is_empty() {
-            p.text(pos2(left.left() + 8.0 * s, y + 20.0 * s), Align2::LEFT_TOP, "Пока нет друзей — найдите их по нику", font(17.0 * s), white(0.5));
-        }
-
-        // ---- right: the chat ----
+        // ---- right: the chat (or a Steam friend's card while one has the focus) ----
         let right = Rect::from_min_max(pos2(left.right() + 40.0 * s, 120.0 * s), pos2(rect.right() - 96.0 * s, rect.bottom() - 110.0 * s));
         p.rect_filled(right, CornerRadius::same((20.0 * s) as u8), Color32::from_rgb(18, 21, 30));
+        if let Some(Item::SteamFriend(id)) = items.get(self.social.idx).filter(|_| self.social.zone == Zone::List) {
+            let id = id.clone();
+            return self.paint_steam_card(ui, right, s, &id);
+        }
         let Some(pk) = self.social.chat.clone() else {
             p.text(right.center(), Align2::CENTER_CENTER, "Выберите друга, чтобы начать чат", font(22.0 * s), white(0.45));
             return;
@@ -1009,6 +1074,124 @@ pub(super) fn paint_messages(p: &egui::Painter, area: Rect, s: f32, msgs: &[Mess
             let gh = g.size().y;
             clip.galley(pos2(tx, ly), g, Color32::WHITE);
             ly += gh + 4.0 * s;
+        }
+    }
+}
+
+/// Opens a steam:// or https:// link outside OTIUM (logged instead under OTIUM_NO_OPEN).
+fn open_external(url: &str) {
+    if std::env::var_os("OTIUM_NO_OPEN").is_some() {
+        eprintln!("open url (suppressed): {url}");
+    } else {
+        let _ = open::that_detached(url);
+    }
+}
+
+impl App {
+    /// Folded sections of the friends list, `settings.friendsCollapsed` = ["otium", "steam"].
+    fn section_folded(&self, steam: bool) -> bool {
+        let key = if steam { "steam" } else { "otium" };
+        self.lib.settings.get("friendsCollapsed").and_then(|v| v.as_array()).is_some_and(|l| l.iter().any(|x| x.as_str() == Some(key)))
+    }
+
+    fn fold_section(&mut self, steam: bool) {
+        let key = if steam { "steam" } else { "otium" };
+        let mut list: Vec<String> = self.lib.settings.get("friendsCollapsed").and_then(|v| v.as_array()).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        if !list.iter().any(|x| x == key) {
+            list.push(key.into());
+        } else {
+            list.retain(|x| x != key);
+        }
+        self.lib.settings.insert("friendsCollapsed".into(), json!(list));
+        self.save();
+    }
+
+    pub(super) fn on_steam_friends(&mut self, res: Result<Vec<crate::steam_api::SteamFriend>, crate::steam_api::ApiError>) {
+        self.social.steam_loading = false;
+        match res {
+            Ok(list) => {
+                self.social.steam = list;
+                self.social.steam_err = None;
+            }
+            // a network hiccup keeps the last list
+            Err(crate::steam_api::ApiError::Network) if !self.social.steam.is_empty() => {}
+            Err(e) => self.social.steam_err = Some(e),
+        }
+    }
+
+    /// The section header row: "Друзья OTIUM · 2 в сети ▾".
+    fn section_label(&self, a: &Account, steam: bool) -> (String, String) {
+        let arrow = if self.section_folded(steam) { "▸" } else { "▾" };
+        if !steam {
+            let online = a.friends.iter().filter(|f| self.presence_of(&f.pk).0).count();
+            return (format!("Друзья OTIUM {arrow}"), format!("{} · {online} в сети", a.friends.len()));
+        }
+        if self.steam_key().is_empty() || self.steam_user().is_empty() {
+            return (format!("Друзья Steam {arrow}"), "подключите Steam в настройках".into());
+        }
+        let sub = match self.social.steam_err {
+            Some(crate::steam_api::ApiError::Private) => "список друзей Steam скрыт".to_string(),
+            Some(crate::steam_api::ApiError::BadKey) => "ключ Steam API не подходит".to_string(),
+            Some(_) if self.social.steam.is_empty() => "не удалось загрузить".to_string(),
+            _ if self.social.steam_loading && self.social.steam.is_empty() => "загружаем…".to_string(),
+            _ => {
+                let online = self.social.steam.iter().filter(|f| f.online()).count();
+                let playing = self.social.steam.iter().filter(|f| f.game.is_some()).count();
+                if playing > 0 { format!("{} · {online} в сети · {playing} играют", self.social.steam.len()) } else { format!("{} · {online} в сети", self.social.steam.len()) }
+            }
+        };
+        (format!("Друзья Steam {arrow}"), sub)
+    }
+
+    /// Right side for a Steam friend: their game's art behind, avatar, status.
+    fn paint_steam_card(&self, ui: &egui::Ui, right: Rect, s: f32, id: &str) {
+        let p = ui.painter();
+        let Some(f) = self.social.steam.iter().find(|f| f.id == id) else { return };
+        let radius = CornerRadius::same((20.0 * s) as u8);
+        if let Some(gid) = &f.game_id {
+            let hero = vec![format!("{}/{gid}/library_hero.jpg", crate::steam::CDN), format!("{}/{gid}/header.jpg", crate::steam::CDN)];
+            if draw::cover(ui, &hero, right, 20.0 * s, white(0.4), (0.5, 0.35)) {
+                // dark enough for the name and status to read over any art
+                draw::vgradient(p, Rect::from_min_max(pos2(right.left(), right.top() + right.height() * 0.25), right.max), Color32::TRANSPARENT, Color32::from_rgba_unmultiplied(18, 21, 30, 250));
+                let band = Rect::from_min_max(pos2(right.left(), right.top() + right.height() * 0.58), pos2(right.right(), right.top() + right.height() * 0.82));
+                p.rect_filled(band, 0.0, Color32::from_rgba_unmultiplied(18, 21, 30, 120));
+            }
+        }
+        let c = pos2(right.center().x, right.top() + right.height() * 0.38);
+        let av = Rect::from_center_size(c, vec2(150.0 * s, 150.0 * s));
+        let shown = f.avatar.as_ref().is_some_and(|u| draw::cover(ui, &[u.clone()], av, 75.0 * s, Color32::WHITE, (0.5, 0.5)));
+        if !shown {
+            p.circle_filled(c, 75.0 * s, draw::name_color(&f.id));
+            p.text(c, Align2::CENTER_CENTER, f.name.chars().next().map(|ch| ch.to_uppercase().to_string()).unwrap_or_default(), bold(60.0 * s), Color32::WHITE);
+        }
+        p.circle_stroke(c, 77.0 * s, Stroke::new(4.0 * s, if f.game.is_some() { BLUE } else if f.online() { GREEN } else { white(0.2) }));
+        p.text(pos2(c.x, av.bottom() + 40.0 * s), Align2::CENTER_CENTER, &f.name, bold(36.0 * s), Color32::WHITE);
+        let col = if f.game.is_some() { Color32::from_rgb(120, 160, 255) } else if f.online() { GREEN } else { white(0.5) };
+        p.text(pos2(c.x, av.bottom() + 82.0 * s), Align2::CENTER_CENTER, f.status(), font(22.0 * s), col);
+        p.text(pos2(c.x, av.bottom() + 120.0 * s), Align2::CENTER_CENTER, "Друг в Steam", font(17.0 * s), white(0.45));
+        let hint = Rect::from_center_size(pos2(c.x, right.bottom() - 60.0 * s), vec2(560.0 * s, 56.0 * s));
+        p.rect_filled(hint, radius, white(0.08));
+        p.text(hint.center(), Align2::CENTER_CENTER, "A — написать в Steam   ·   Y — профиль Steam", font(19.0 * s), white(0.75));
+    }
+}
+
+impl App {
+    /// `OTIUM_OPEN_SOCIAL=steam`: opens the friends panel with the first Steam friend focused,
+    /// once they have loaded (for testing without sending keys).
+    pub(super) fn debug_open_social(&mut self) {
+        static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if std::env::var("OTIUM_OPEN_SOCIAL").ok().as_deref() != Some("steam") || DONE.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Some(a) = self.account() else { return };
+        if self.splash_start.is_some() {
+            return;
+        }
+        self.social.open = true;
+        let items = self.items(&a);
+        if let Some(i) = items.iter().position(|it| matches!(it, Item::SteamFriend(_))) {
+            self.social.idx = i;
+            DONE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }

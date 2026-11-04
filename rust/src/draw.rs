@@ -174,6 +174,7 @@ pub mod ic {
     pub const PAUSE: &str = "\u{E769}";
     pub const GAME: &str = "\u{E7FC}";
     pub const MUSIC: &str = "\u{E8D6}";
+    pub const LOCK: &str = "\u{E72E}";
 }
 
 pub fn white(a: f32) -> Color32 {
