@@ -832,6 +832,8 @@ body.cc-open .toasts { bottom: 200px; }
 }
 .btn-play.focus, .btn-round.focus { background: var(--white); color: #000; transform: scale(1.04); box-shadow: 0 0 26px rgba(255, 255, 255, 0.35); }
 .btn-play:hover:not(.focus), .btn-round:hover:not(.focus) { background: rgba(255, 255, 255, 0.3); }
+.btn-play.stop { background: rgba(239, 68, 68, 0.35); }
+.btn-play.stop.focus { background: #ef4444; color: #fff; box-shadow: 0 0 26px rgba(239, 68, 68, 0.5); }
 .info.empty .actions .btn-round { display: none; }
 
 /* ---------- Footer hints ---------- */

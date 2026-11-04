@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, session, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
 const steam = require('./steam');
 const system = require('./system');
@@ -293,6 +293,40 @@ ipcMain.handle('win:returnToGame', () => {
   else if (gameStartedAt) pad?.focusNew(gameStartedAt);
 });
 
+// ---------- Closing a running game ----------
+const gamePids = new Map(); // game id -> pid of the exe we started
+
+// processes whose executable lives in `dir` (or is exactly `exe`)
+function processesUnder({ dir, exe }) {
+  return new Promise((resolve) => {
+    const script = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ((($env:PS5L_DIR) -and $_.ExecutablePath.StartsWith($env:PS5L_DIR + '\\', 'OrdinalIgnoreCase')) -or (($env:PS5L_EXE) -and $_.ExecutablePath -ieq $env:PS5L_EXE)) } | ForEach-Object { $_.ProcessId }`;
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, env: { ...process.env, PS5L_DIR: dir || '', PS5L_EXE: exe || '' } },
+      (err, out) => resolve(err ? [] : out.split(/\s+/).map(Number).filter((n) => n > 0)));
+  });
+}
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const taskkill = (pid, force) => new Promise((r) => execFile('taskkill', ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])], { windowsHide: true }, () => r()));
+
+ipcMain.handle('game:close', async (_e, game) => {
+  const pids = new Set();
+  if (gamePids.has(game.id)) pids.add(gamePids.get(game.id));
+  const sid = game.steamId || (game.path || '').match(/^steam:\/\/(?:rungameid|run)\/(\d+)/i)?.[1];
+  if (sid) {
+    const dir = await steam.installDir(sid);
+    if (dir) (await processesUnder({ dir })).forEach((p) => pids.add(p));
+  } else if (/\.exe$/i.test(game.path || '')) {
+    (await processesUnder({ exe: path.normalize(game.path.replace(/^"|"$/g, '')) })).forEach((p) => pids.add(p));
+  }
+  if (!pids.size) return { ok: false, error: 'Не нашёл процесс игры' };
+  // ask nicely first (like the window's close button), then force whatever is still running
+  for (const pid of pids) await taskkill(pid, false);
+  for (let i = 0; i < 10 && [...pids].some(pidAlive); i++) await new Promise((r) => setTimeout(r, 500));
+  const stubborn = [...pids].filter(pidAlive);
+  for (const pid of stubborn) await taskkill(pid, true);
+  return { ok: true, count: pids.size, forced: stubborn.length > 0 };
+});
+
 ipcMain.handle('game:launch', async (_e, game) => {
   const target = (game.path || '').trim().replace(/^"|"$/g, '');
   if (!target) return { ok: false, error: 'Не указан путь к игре' };
@@ -313,7 +347,9 @@ ipcMain.handle('game:launch', async (_e, game) => {
     const child = spawn(target, parseArgs(game.args || ''), { cwd: path.dirname(target), detached: true, stdio: 'ignore' });
     child.once('spawn', () => {
       child.unref();
+      gamePids.set(game.id, child.pid);
       child.once('exit', () => {
+        gamePids.delete(game.id);
         send('game:exited', { id: game.id, start: started, end: Date.now() });
         gameEnded();
       });

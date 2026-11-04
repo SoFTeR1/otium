@@ -510,7 +510,28 @@ function fillInfo(g) {
   meta.push(lastPlayedOf(g) ? 'Последний запуск: ' + fmtDate(lastPlayedOf(g)) : 'Ещё не запускалась');
   if (totalPlaytime(g)) meta.push('Сыграно: ' + fmtPlaytime(totalPlaytime(g)));
   $('#meta').innerHTML = meta.map((m) => (m.startsWith('<span') ? m : `<span>${esc(m)}</span>`)).join('');
-  $('#btnPlay').textContent = g.category === 'app' ? 'Открыть' : 'Играть';
+  const isRunning = running.has(g.id);
+  $('#btnPlay').textContent = isRunning ? (g.category === 'app' ? 'Закрыть' : 'Закрыть игру') : g.category === 'app' ? 'Открыть' : 'Играть';
+  $('#btnPlay').classList.toggle('stop', isRunning);
+}
+
+// "Play" turns into "Close game" while the game runs
+function confirmCloseGame(g) {
+  openModal(`<h2>Закрыть «${esc(g.name)}»?</h2>
+    <div class="meta"><span>Игра получит команду закрыться, а если не ответит за 5 секунд — будет завершена. Несохранённый прогресс может потеряться.</span></div>
+    <div class="buttons"><button class="btn focusable" id="cgNo">Отмена</button><button class="btn danger focusable" id="cgYes">Закрыть игру</button></div>`, { focus: 0 });
+  $('#cgNo').onclick = closeModal;
+  $('#cgYes').onclick = async () => {
+    closeModal();
+    toast(`Закрываем ${g.name}…`, false, { title: 'Игра', icon: '⏹' });
+    const r = await ipc.closeGame(g);
+    if (!r?.ok) return toast(r?.error || 'Не получилось закрыть игру', true, { title: g.name });
+    // exe games report their exit themselves; Steam updates its running-app flag within a few seconds
+    setTimeout(() => {
+      if (running.has(g.id) && !steamIdOf(g)) { running.delete(g.id); render(g.id); }
+    }, 1500);
+    toast(r.forced ? 'Игра не отвечала и была завершена принудительно' : 'Игра закрыта', false, { title: g.name, icon: '✅' });
+  };
 }
 
 let tabSwitchTimer;
@@ -688,6 +709,7 @@ async function loadSteamLocal() {
 function activate() {
   const g = list[sel];
   if (g?.kind === 'friend') return openProfile(friendView(g));
+  if (g && running.has(g.id)) return confirmCloseGame(g);
   if (!g && tab === 'activity') { openSocial(); social.idx = 1; return activateItem(); }
   if (g) launch(g);
   else openEditor();
@@ -865,7 +887,7 @@ function openOptions() {
     return;
   }
   const items = [
-    ['play', g.category === 'app' ? 'Открыть' : 'Играть'],
+    running.has(g.id) ? ['close', g.category === 'app' ? 'Закрыть' : 'Закрыть игру', 'danger'] : ['play', g.category === 'app' ? 'Открыть' : 'Играть'],
     ['edit', 'Изменить'],
     ['first', 'Сделать первой в списке'],
     ['reorder', 'Переставить'],
@@ -882,6 +904,7 @@ function openOptions() {
     if (id === 'edit') openEditor(g);
     if (id === 'folder') { closeModal(); ipc.showItem(g.path); }
     if (id === 'first') { closeModal(); moveToFront(g); }
+    if (id === 'close') { closeModal(); confirmCloseGame(g); }
     if (id === 'reorder') { closeModal(); startReorder(); }
     if (id === 'bg' || id === 'bgReset') {
       let url = '';

@@ -173,7 +173,10 @@ function renderCC() {
   const g = runningGame();
   const m = currentMusic;
   const items = [];
-  if (g) items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
+  if (g) {
+    items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
+    items.push({ cls: 'ctl hangup', html: `${CC_ICONS.stop}<div class="d">Закрыть</div>`, ok: () => { closeCC(); confirmCloseGame(g); } });
+  }
   else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
   if (room.gid) {
     const g = groupById(room.gid);
@@ -314,6 +317,7 @@ function ccHandle(act) {
 }
 
 const CC_ICONS = {
+  stop: '<svg class="ci" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.3 12.9-1.4 1.4L12 13.4l-2.9 2.9-1.4-1.4 2.9-2.9-2.9-2.9 1.4-1.4 2.9 2.9 2.9-2.9 1.4 1.4-2.9 2.9z"/></svg>',
   minimize: '<svg class="ci" viewBox="0 0 24 24"><path d="M5 17h14v2H5zm7-2-6-7h4V4h4v4h4z"/></svg>',
   vol: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
   mute: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4z"/></svg>',

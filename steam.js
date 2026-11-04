@@ -130,6 +130,24 @@ async function scan() {
   return { games };
 }
 
+// Folder a Steam game is installed in (steamapps/common/<installdir>), to find its processes
+async function installDir(appid) {
+  const root = await steamRoot();
+  if (!root) return null;
+  const libs = new Set([root]);
+  try {
+    const vdf = parseVdf(fs.readFileSync(path.join(root, 'steamapps', 'libraryfolders.vdf'), 'utf8'));
+    for (const lib of Object.values(get(vdf, 'libraryfolders') || {})) if (lib?.path) libs.add(path.normalize(lib.path));
+  } catch {}
+  for (const lib of libs) {
+    try {
+      const st = get(parseVdf(fs.readFileSync(path.join(lib, 'steamapps', `appmanifest_${appid}.acf`), 'utf8')), 'AppState');
+      if (st?.installdir) return path.join(lib, 'steamapps', 'common', st.installdir);
+    } catch {}
+  }
+  return null;
+}
+
 // The Steam account that was used last = the userdata folder with the freshest localconfig.vdf
 async function currentUser() {
   const root = await steamRoot();
@@ -380,4 +398,4 @@ function trailer(appid) {
   });
 }
 
-module.exports = { scan, localStats, currentUser, watchRunning, running, news, achievements, friends, checkAccount, playerGames, sales, trailer, clearCache: (prefix) => [...cache.keys()].forEach((k) => k.startsWith(prefix) && cache.delete(k)) };
+module.exports = { scan, installDir, localStats, currentUser, watchRunning, running, news, achievements, friends, checkAccount, playerGames, sales, trailer, clearCache: (prefix) => [...cache.keys()].forEach((k) => k.startsWith(prefix) && cache.delete(k)) };
