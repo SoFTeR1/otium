@@ -374,7 +374,7 @@ impl App {
         } else if !mine && recent(5) {
             let name = self.display_name(&a, &other);
             let short: String = text.chars().take(120).collect();
-            self.toast(&format!("{name}: {short}"), false);
+            self.notify(&name, &short, (other.clone(), name.clone()));
             if self.sounds_on() {
                 crate::sound::play(crate::sound::Sfx::Ok);
             }

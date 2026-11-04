@@ -62,6 +62,8 @@ pub struct App {
     bg_changed: Instant,
     splash_start: Option<Instant>,
     toast: Option<Toast>,
+    overlay: crate::overlay::Overlay,
+    overlay_demo_toasts: u32,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
@@ -160,6 +162,8 @@ impl App {
             bg_changed: Instant::now() - Duration::from_secs(5),
             splash_start: splash.then(Instant::now),
             toast: None,
+            overlay: Default::default(),
+            overlay_demo_toasts: 0,
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
@@ -491,7 +495,25 @@ impl App {
     }
 
     fn toast(&mut self, text: &str, error: bool) {
+        if self.away() {
+            return self.overlay.toast("OTIUM", text, None, error);
+        }
         self.toast = Some(Toast { text: text.into(), error, at: Instant::now() });
+    }
+
+    /// A notification from someone: over the game it gets their name as the title and their
+    /// avatar; inside OTIUM it is the usual toast.
+    fn notify(&mut self, title: &str, text: &str, avatar: (String, String)) {
+        if self.away() {
+            return self.overlay.toast(title, text, Some(avatar), false);
+        }
+        self.toast(&format!("{title}: {text}"), false);
+    }
+
+    /// OTIUM isn't the window in front (a game or anything else is, or it's in the tray).
+    fn away(&self) -> bool {
+        let own = self.own.load(Ordering::Relaxed);
+        own != 0 && crate::win::foreground() != own
     }
 
     /// Playtime in seconds: whichever is larger, ours or what the Steam client recorded.
@@ -644,6 +666,12 @@ impl eframe::App for App {
                 }
             }
         });
+        self.paint_overlay(ctx);
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // the main window paints every pixel itself; only the overlay shows what's under it
+        [0.0; 4]
     }
 }
 

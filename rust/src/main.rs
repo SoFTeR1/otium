@@ -10,6 +10,7 @@ mod input;
 mod keyboard;
 mod launch;
 mod nostr;
+mod overlay;
 mod padtest;
 mod modal;
 mod sound;
@@ -30,7 +31,9 @@ fn main() -> eframe::Result {
         .with_title("OTIUM")
         .with_inner_size([1600.0, 900.0])
         .with_min_inner_size([960.0, 540.0])
-        .with_fullscreen(fullscreen);
+        .with_fullscreen(fullscreen)
+        // the GL config is picked for the main window: it needs alpha so the overlay can be see-through
+        .with_transparent(true);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../build/icon.png")) {
         viewport = viewport.with_icon(Arc::new(icon));
     }

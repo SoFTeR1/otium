@@ -715,7 +715,7 @@ impl App {
                 } else if age < 5 * 60_000 {
                     let who = self.member_name(&g, from);
                     let short: String = text.chars().take(120).collect();
-                    self.toast(&format!("{who} · {}: {short}", g.title(&me)), false);
+                    self.notify(&format!("{who} · {}", g.title(&me)), &short, (g.id.clone(), g.title(&me)));
                     if self.sounds_on() {
                         play(Sfx::Ok);
                     }
@@ -1144,6 +1144,110 @@ impl App {
             p.text(r.center() - vec2(14.0 * s, 0.0), Align2::CENTER_CENTER, label, semibold(23.0 * s), Color32::WHITE);
             draw::pad_glyph(p, pos2(r.right() - 34.0 * s, r.center().y), 14.0 * s, glyph(b), Color32::WHITE);
             x += 290.0 * s;
+        }
+    }
+
+    /// What the overlay over a game shows about calls: the incoming card, or the voice widget.
+    fn overlay_call(&self) -> Option<crate::overlay::CallView> {
+        use crate::overlay::{CallView, Person};
+        let me = self.me_pk();
+        if let Some(r) = &self.calls.ring {
+            let g = self.group(&r.gid)?;
+            return Some(CallView::Incoming { key: g.id.clone(), name: g.title(&me), kicker: format!("{} зовёт в голосовой", self.member_name(&g, &r.from)), group: true });
+        }
+        let speaking = |k: &str| self.calls.speaking.get(k).copied().unwrap_or(false);
+        if let Some(r) = &self.calls.room {
+            let g = self.group(&r.gid)?;
+            let mut people = vec![Person { key: me.clone(), name: self.my_name(), muted: r.muted, deafened: r.deafened, speaking: speaking(""), connected: true }];
+            for (pk, p) in &r.peers {
+                people.push(Person { key: pk.clone(), name: self.member_name(&g, pk), muted: p.muted, deafened: p.deafened, speaking: speaking(pk), connected: p.connected });
+            }
+            return Some(CallView::Active { title: g.title(&me), status: None, started: Some(r.joined), people });
+        }
+        let c = &self.calls.call;
+        let a = self.account()?;
+        let name = self.display_name(&a, &c.pk);
+        let status = match c.state {
+            CallState::Idle => return None,
+            CallState::Incoming => return Some(CallView::Incoming { key: c.pk.clone(), name, kicker: "Входящий звонок".into(), group: false }),
+            CallState::Outgoing => Some("Звоним…".to_string()),
+            CallState::Connecting => Some("Соединяем…".to_string()),
+            CallState::Active => None,
+        };
+        let people = vec![
+            Person { key: me.clone(), name: self.my_name(), muted: c.muted, deafened: c.deafened, speaking: speaking(""), connected: true },
+            Person { key: c.pk.clone(), name, muted: c.remote_muted, deafened: c.remote_deafened, speaking: speaking(&c.pk), connected: c.state == CallState::Active },
+        ];
+        Some(CallView::Active { title: "Голосовой звонок".into(), status, started: c.started, people })
+    }
+
+    /// `OTIUM_OVERLAY_DEMO=call|incoming`: the overlay shows a made-up call (whether OTIUM is in
+    /// front or not) and a notification every few seconds, to test it without a friend.
+    fn overlay_demo(&mut self, kind: &str) -> crate::overlay::CallView {
+        use crate::overlay::{CallView, Person};
+        let t = self.started.elapsed().as_secs_f32();
+        if self.overlay_demo_toasts < (t / 4.0) as u32 + 1 {
+            self.overlay_demo_toasts += 1;
+            let n = self.overlay_demo_toasts;
+            if n % 2 == 1 {
+                self.overlay.toast("Аня", &format!("Сообщение номер {n}: заходи в голосовой, мы уже собрались, длинный текст переносится на несколько строк"), Some(("demo-anya".into(), "Аня".into())), false);
+            } else {
+                self.overlay.toast("OTIUM", "Не удалось соединиться — проверьте интернет", None, true);
+            }
+        }
+        if kind == "incoming" {
+            return CallView::Incoming { key: "demo-anya".into(), name: "Аня".into(), kicker: "Входящий звонок".into(), group: false };
+        }
+        let talk = (t * 1.3) as u32 % 3;
+        let people = vec![
+            Person { key: "demo-me".into(), name: self.my_name(), muted: false, deafened: false, speaking: talk == 0, connected: true },
+            Person { key: "demo-anya".into(), name: "Аня".into(), muted: false, deafened: false, speaking: talk == 1, connected: true },
+            Person { key: "demo-max".into(), name: "Максим".into(), muted: true, deafened: false, speaking: false, connected: true },
+            Person { key: "demo-fox".into(), name: "Лиса".into(), muted: true, deafened: true, speaking: false, connected: true },
+            Person { key: "demo-kot".into(), name: "Кот".into(), muted: false, deafened: false, speaking: false, connected: false },
+        ];
+        CallView::Active { title: "Голосовой звонок".into(), status: None, started: Some(self.started), people }
+    }
+
+    /// The overlay window over the game; only while OTIUM itself isn't in front.
+    pub(super) fn paint_overlay(&mut self, ctx: &egui::Context) {
+        use crate::overlay::Action;
+        // not while OTIUM is starting: its own window is about to take the focus, and a window
+        // shown before that could get it instead
+        if self.splash_start.is_some() || self.started.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        let mut call = if self.away() { self.overlay_call() } else { None };
+        if let Some(demo) = std::env::var("OTIUM_OVERLAY_DEMO").ok() {
+            call = Some(self.overlay_demo(&demo));
+        }
+        let own = self.own.load(std::sync::atomic::Ordering::Relaxed);
+        let action = self.overlay.show(ctx, own, call);
+        if std::env::var_os("OTIUM_OVERLAY_DEMO").is_some() && action.is_some() {
+            eprintln!("overlay {action:?}");
+        }
+        match action {
+            Some(Action::Accept) => {
+                if let Some(r) = &self.calls.ring {
+                    let gid = r.gid.clone();
+                    self.join_room(&gid);
+                } else {
+                    self.accept_call();
+                }
+            }
+            Some(Action::Decline) => {
+                if self.calls.ring.is_some() {
+                    self.stop_group_ring();
+                } else {
+                    self.decline_call();
+                }
+            }
+            Some(Action::OpenCall) => {
+                self.show_window();
+                self.refocus = true;
+                self.open_call_menu(0);
+            }
+            None => {}
         }
     }
 

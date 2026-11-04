@@ -427,3 +427,77 @@ impl raw_window_handle::HasDisplayHandle for Owner {
         Ok(raw_window_handle::DisplayHandle::windows())
     }
 }
+
+/// The monitor a window is on, in physical pixels: (x, y, width, height).
+pub fn monitor_rect(h: isize) -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
+    unsafe {
+        let m = MonitorFromWindow(hwnd(h), MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(m, &mut info).as_bool() {
+            return None;
+        }
+        let r = info.rcMonitor;
+        Some((r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+}
+
+/// Mouse position on screen, physical pixels.
+pub fn cursor_pos() -> Option<(i32, i32)> {
+    let mut p = windows::Win32::Foundation::POINT::default();
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p).ok().map(|_| (p.x, p.y)) }
+}
+
+/// A top-level window of ours by its exact title.
+pub fn find_own_window(title: &str) -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let Ok(w) = (unsafe { FindWindowW(PCWSTR::null(), PCWSTR(wide.as_ptr())) }) else { return 0 };
+    if window_pid(w.0 as isize) != std::process::id() {
+        return 0;
+    }
+    w.0 as isize
+}
+
+/// Makes the overlay a window that never takes focus (clicking it leaves the game in front),
+/// keeps it above everything and stretches it over `rect`. `last_ex` remembers the extended style
+/// we last saw: winit rewrites it when click-through toggles, and then it needs fixing again.
+pub fn pin_overlay(h: isize, rect: (i32, i32, i32, i32), restack: bool, last_ex: &mut isize) {
+    use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND};
+    use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, LWA_ALPHA, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    };
+    let w = hwnd(h);
+    unsafe {
+        let ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+        if ex != *last_ex {
+            let want = ex | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize;
+            if ex != want {
+                SetWindowLongPtrW(w, GWL_EXSTYLE, want);
+            }
+            if want & WS_EX_LAYERED.0 as isize != 0 {
+                // click-through makes it layered: fully opaque as a layer, the per-pixel alpha
+                // comes from the blur-behind below
+                let _ = SetLayeredWindowAttributes(w, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+            }
+            // winit turns on blur-behind (DWM composing with our alpha) when it creates the window,
+            // but by the time the overlay is shown it has no effect and the clear colour comes out
+            // black: turn it on again after every style change
+            let region = CreateRectRgn(0, 0, -1, -1);
+            let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: region, fTransitionOnMaximized: false.into() };
+            let _ = DwmEnableBlurBehindWindow(w, &bb);
+            let _ = DeleteObject(region);
+            *last_ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+        }
+        let mut r = windows::Win32::Foundation::RECT::default();
+        let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(w, &mut r);
+        let placed = (r.left, r.top, r.right - r.left, r.bottom - r.top) == rect;
+        if !placed {
+            let _ = SetWindowPos(w, HWND_TOPMOST, rect.0, rect.1, rect.2, rect.3, SWP_NOACTIVATE);
+        } else if restack {
+            let _ = SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+}
