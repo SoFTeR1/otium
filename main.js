@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -35,6 +35,8 @@ let hiddenForGame = false;
 let pad = null;        // background gamepad watcher
 let gameHwnd = null;   // window that was in front when the Guide button summoned us
 let ownHwnd = null;
+let gameStartedAt = 0; // when the current game was launched (to find its window)
+let quitting = false;
 let coverTimer = null; // keeps us topmost while a game is starting
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -78,6 +80,10 @@ function createWindow() {
     }
   });
   win.setMenu(null);
+  // never let the desktop show: if anything minimises us (Win+D, a game), come straight back
+  win.on('minimize', () => {
+    if (!quitting) setTimeout(() => win && !win.isDestroyed() && win.restore(), 120);
+  });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') {
@@ -110,6 +116,7 @@ function forceFront(holdMs = 1500) {
 
 function gameEnded() {
   gameHwnd = null;
+  gameStartedAt = 0;
   if (!hiddenForGame) return;
   hiddenForGame = false;
   forceFront();
@@ -179,23 +186,26 @@ ipcMain.handle('win:cover', (_e, on) => {
     win.setAlwaysOnTop(false);
   }
 });
-ipcMain.handle('win:stepAside', () => {
+// The launcher is the base layer of the screen, like the PS5 shell: it is never minimised.
+// Once the game is up we stop being topmost and put the game's window above us; the desktop never shows.
+ipcMain.handle('win:stepAside', (_e, launchedAt) => {
   if (!win) return;
   clearInterval(coverTimer);
   coverTimer = null;
   win.setAlwaysOnTop(false);
   hiddenForGame = true;
-  win.minimize();
+  gameStartedAt = launchedAt || Date.now();
+  pad?.focusNew(gameStartedAt);
 });
-// "Back to game": minimising alone lets Windows pick any window, so explicitly re-activate the game's window
+// "Back to game": activate the game's window above us
 ipcMain.handle('win:returnToGame', () => {
   if (!win) return;
   clearInterval(coverTimer);
   coverTimer = null;
   win.setAlwaysOnTop(false);
   hiddenForGame = true;
-  win.minimize();
-  if (gameHwnd) setTimeout(() => pad?.focus(gameHwnd), 150);
+  if (gameHwnd) pad?.focus(gameHwnd);
+  else if (gameStartedAt) pad?.focusNew(gameStartedAt);
 });
 
 ipcMain.handle('game:launch', async (_e, game) => {
@@ -325,12 +335,16 @@ ipcMain.handle('upd:download', async () => {
 ipcMain.handle('upd:install', () => autoUpdater.quitAndInstall(true, true));
 
 app.whenReady().then(() => {
+  // microphone for voice calls, system notifications for incoming calls
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(['media', 'notifications', 'fullscreen'].includes(perm)));
+  session.defaultSession.setPermissionCheckHandler((_wc, perm) => ['media', 'notifications', 'fullscreen'].includes(perm));
   createWindow();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
   ownHwnd = hwnd;
   pad = gamepad.watch(hwnd, (ev) => {
-    if (ev.startsWith('front')) {
+    if (ev.startsWith('game ')) gameHwnd = ev.split(' ')[1];
+    else if (ev.startsWith('front')) {
       // the window that was in front when Guide was pressed — normally the game
       const prev = ev.split(' ')[1];
       if (prev && prev !== '0' && prev !== hwnd) gameHwnd = prev;
@@ -345,4 +359,5 @@ app.whenReady().then(() => {
   });
 });
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => { system.shutdown(); audio.shutdown(); });

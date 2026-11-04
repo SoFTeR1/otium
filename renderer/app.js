@@ -279,11 +279,20 @@ function setVideoBg(url) {
   }
 }
 // don't burn the GPU on a trailer while a game is running
-document.addEventListener('visibilitychange', () => {
+// The launcher now stays under the game instead of minimising, so "hidden" no longer means "in a game":
+// a game is running and we don't have focus → idle (pause the trailer, skip polling)
+function idleBehindGame() {
+  return document.hidden || (running.size > 0 && !document.hasFocus());
+}
+function syncIdle() {
   const v = $('#bgVideo');
-  if (document.hidden) v.pause();
+  document.body.classList.toggle('idle', idleBehindGame());
+  if (idleBehindGame()) v.pause();
   else if (videoUrl) v.play().catch(() => {});
-});
+}
+document.addEventListener('visibilitychange', syncIdle);
+window.addEventListener('blur', () => setTimeout(syncIdle, 300));
+window.addEventListener('focus', syncIdle);
 
 // ---------- Rendering ----------
 const SORT_NAMES = { recent: 'Недавние', alpha: 'По алфавиту', custom: 'Свой порядок' };
@@ -519,6 +528,7 @@ async function launch(g) {
   busy = true;
   sfx.launch();
 
+  const launchedAt = Date.now();
   const tile = $('#track').children[list.indexOf(g)];
   const from = tile?.getBoundingClientRect() || { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 };
   const size = Math.min(innerHeight * 0.26, 300);
@@ -590,10 +600,10 @@ async function launch(g) {
     $('.launch-sub', ov).textContent = g.category === 'app' ? 'Открыто' : 'Игра запущена';
     await sleep(900);
   }
-  finishLaunch(g, ov, true);
+  finishLaunch(g, ov, true, launchedAt);
 }
 
-async function finishLaunch(g, ov, stepAside) {
+async function finishLaunch(g, ov, stepAside, launchedAt) {
   launching = null;
   if (stepAside) launchStarted[g.id] = Date.now();
   publishPresence();
@@ -602,8 +612,9 @@ async function finishLaunch(g, ov, stepAside) {
   zone = 'row';
   render(g.id);
   if (stepAside) {
-    await ipc.stepAside();
-    ov.remove();
+    // the game window is raised above us; keep the splash a moment so there's no flash while it appears
+    await ipc.stepAside(launchedAt);
+    setTimeout(() => { ov.classList.add('out'); setTimeout(() => ov.remove(), 560); }, 2500);
   } else {
     ov.classList.add('out');
     await sleep(560);
@@ -840,7 +851,9 @@ function openOptions() {
   if (!g) return tab === 'activity' ? activate() : openEditor();
   if (g.kind === 'friend') {
     openModal(`<button class="menu-item focusable" id="fProf">Открыть профиль</button>
-      <button class="menu-item focusable" id="fChat">Написать</button>`, { cls: 'menu' });
+      <button class="menu-item focusable" id="fChat">Написать</button>
+      ${g.src === 'launcher' ? '<button class="menu-item focusable" id="fCall">Позвонить</button>' : ''}`, { cls: 'menu' });
+    if ($('#fCall')) $('#fCall').onclick = () => { closeModal(); startCall(g.pk); };
     $('#fProf').onclick = () => { closeModal(); openProfile(friendView(g)); };
     $('#fChat').onclick = () => { closeModal(); chatWith(g); };
     return;
@@ -1130,6 +1143,7 @@ function handle(act, src) {
     return;
   }
   if (osk.open) return oskHandle(act);
+  if (callCardOpen()) return callHandle(act);
   if (act === 'lb') return;
   if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);

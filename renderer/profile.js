@@ -128,7 +128,7 @@ async function renderProfile() {
         <div class="d ${p.game ? 'game' : ''}">● ${esc(p.text)}</div></div>
         <div class="pf-stats">${statChip(games.length, 'игр')}${statChip(hours(games.reduce((s, g) => s + (g.p || 0), 0)), 'наиграно')}</div>
       </div>
-      <div class="pf-sec"><div class="pf-row"><div class="pfi pf-btn" data-chat="${pk}">💬 Написать</div></div></div>
+      <div class="pf-sec"><div class="pf-row"><div class="pfi pf-btn" data-chat="${pk}">💬 Написать</div><div class="pfi pf-btn" data-call="${pk}">📞 Позвонить</div></div></div>
       <div class="pf-sec"><div class="fhead">Последний трофей</div>${trophyCard(lib?.trophy)}</div>
       <div class="pf-sec"><div class="fhead">Игры</div><div class="pf-row wrap">${games.length ? games.map((g) => gameCard(g.n, g.s, [g.p ? hours(g.p) : '', g.l ? fmtDate(g.l) : ''].filter(Boolean).join(' · '))).join('') : '<div class="pf-empty">Друг ещё не открыл свою библиотеку — она появится, когда он обновит лаунчер</div>'}</div></div>`;
   } else if (view.kind === 'steam') {
@@ -199,6 +199,7 @@ function activateProfileItem(n) {
   if (n.dataset.friend) return pushProfile({ kind: 'friend', id: n.dataset.friend });
   if (n.dataset.steam) return pushProfile({ kind: 'steam', id: n.dataset.steam });
   if (n.dataset.url) return ipc.openUrl(n.dataset.url);
+  if (n.dataset.call) { closeProfile(); return startCall(n.dataset.call); }
   if (n.dataset.action === 'social') { closeProfile(); return openSocial(); }
   if (n.dataset.chat) {
     closeProfile();

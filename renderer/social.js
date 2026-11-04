@@ -163,6 +163,11 @@ async function onDM(ev) {
   let ctrl = null;
   if (text.startsWith('{"pl":"' + CTRL)) { try { ctrl = JSON.parse(text); } catch {} }
   if (ctrl) {
+    // voice call signaling
+    if (['call', 'ans', 'decl', 'busy', 'end'].includes(ctrl.t)) {
+      if (!mine) onCallSignal(other, ctrl, ev.created_at);
+      return;
+    }
     if (ctrl.t === 'fr' && !mine) {
       if (isFriend(other)) return;
       // both sides asked — that's a yes
@@ -359,7 +364,8 @@ function renderSocial() {
     const p = presenceOf(pk);
     const msgs = a.history[pk] || [];
     right = `
-      <div class="schat-head">${avatar(pk, nameOf(pk))}<div><div class="t">${esc(nameOf(pk))}</div><div class="d ${p.game ? 'game' : ''}">${esc(p.text)}</div></div></div>
+      <div class="schat-head">${avatar(pk, nameOf(pk))}<div><div class="t">${esc(nameOf(pk))}</div><div class="d ${p.game ? 'game' : ''}">${esc(p.text)}</div></div>
+        <button class="btn call-btn" id="sCall">${CALL_ICONS.phone} Позвонить <span class="kb">${GLYPHS[currentLayout()].menu[0]}</span></button></div>
       <div class="smsgs" id="smsgs">${msgs.length ? msgs.map((m, i) => {
         const day = new Date(m.at).toDateString();
         const sep = i === 0 || new Date(msgs[i - 1].at).toDateString() !== day ? `<div class="sday">${fmtDate(m.at).replace(/, \d\d:\d\d$/, '')}</div>` : '';
@@ -383,6 +389,7 @@ function renderSocial() {
     inp.oninput = () => (social.draft = inp.value);
     inp.onfocus = () => { social.zone = 'chat'; social.chatFocus = 0; };
     $('#sSend').onclick = sendCurrent;
+    $('#sCall').onclick = () => startCall(social.chat);
     if (social.zone === 'chat' && social.chatFocus === 0 && document.activeElement !== inp && !osk.open) inp.focus();
   }
   $('#socLeft .sitem.focus')?.scrollIntoView({ block: 'nearest' });
@@ -470,6 +477,7 @@ function socialHandle(act, src) {
   // chat
   const m = $('#smsgs');
   if (act === 'back') { sfx.back(); social.zone = 'list'; document.activeElement?.blur(); return renderSocial(); }
+  if (act === 'menu') return startCall(social.chat);
   if (act === 'up' || act === 'down') { m?.scrollBy({ top: act === 'down' ? 140 : -140, behavior: 'smooth' }); return; }
   if (act === 'left') {
     if (social.chatFocus === 1) social.chatFocus = 0;
@@ -608,7 +616,9 @@ function openRequestModal(pk) {
 
 function openFriendMenu(pk) {
   openModal(`<button class="menu-item focusable" id="mChat">Написать</button>
+    <button class="menu-item focusable" id="mCall">Позвонить</button>
     <button class="menu-item focusable danger" id="mDel">Удалить из друзей</button>`, { cls: 'menu' });
+  $('#mCall').onclick = () => { closeModal(); startCall(pk); };
   $('#mChat').onclick = () => { closeModal(); social.idx = listItems().findIndex((x) => x.pk === pk); activateItem(); };
   $('#mDel').onclick = () => { closeModal(); removeFriend(pk); toast('Удалено из друзей'); };
 }

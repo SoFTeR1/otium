@@ -27,11 +27,11 @@ function feedInit() {
   refreshSales();
   setInterval(refreshSales, 30 * 60e3);
   refreshFriends();
-  setInterval(() => !document.hidden && refreshFriends(), 60e3);
+  setInterval(() => !idleBehindGame() && refreshFriends(), 60e3);
   refreshPc();
-  setInterval(() => !document.hidden && refreshPc(), 3000);
+  setInterval(() => !idleBehindGame() && refreshPc(), 3000);
   pollMusic();
-  setInterval(() => !document.hidden && pollMusic(), 2000);
+  setInterval(() => !idleBehindGame() && pollMusic(), 2000);
 }
 
 // cards: [{ html, cls, ok }]. Same number of cards → update in place so entry animations don't replay.

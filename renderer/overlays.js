@@ -166,6 +166,11 @@ function renderCC() {
   const items = [];
   if (g) items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
   else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
+  if (inCall() && call.state === 'active') {
+    items.push({ cls: 'wide game', html: `<div class="ccimg call-ic">${CALL_ICONS.phone}</div><div><div class="d">Звонок</div><div class="t">${esc(nameOf(call.pk))}</div><div class="d">${call.muted ? 'микрофон выключен' : 'микрофон включён'}</div></div>`, ok: () => { toggleMic(); renderCC(); } });
+    items.push({ cls: 'ctl', html: call.muted ? CALL_ICONS.micOff.replace('<svg', '<svg class="ci"') : CALL_ICONS.mic.replace('<svg', '<svg class="ci"'), ok: () => { toggleMic(); renderCC(); } });
+    items.push({ cls: 'ctl hangup', html: CALL_ICONS.hang.replace('<svg', '<svg class="ci"'), ok: () => { hangUp(); renderCC(); } });
+  }
   items.push({ cls: 'home', html: `${CC_ICONS.home}<div class="d">Главная</div>`, ok: () => { closeCC(); zone = 'row'; update(); } });
   if (m?.title) {
     items.push({ cls: 'wide music', html: `<div class="ccimg ${music.art ? '' : 'noart'}" ${music.art ? `style="background-image:url('${music.art}')"` : ''}>${music.art ? '' : '♪'}</div><div><div class="d">${esc(appName(m.app))}</div><div class="t">${esc(m.title)}</div><div class="d">${esc(m.artist || '')}</div></div>`, ok: () => musicCmd('toggle').then(renderCC) });
