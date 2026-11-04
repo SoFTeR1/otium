@@ -194,6 +194,7 @@ function renderCC() {
   items.push({ cls: 'chat', html: `${CC_ICONS.chat}<div class="d">Друзья${unread ? ` · <b class="badge">${unread}</b>` : ''}</div>`, ok: () => { closeCC(); openSocial(); } });
   items.push({ cls: 'vol', html: `${CC_ICONS.vol}<div class="d">Звук</div>`, ok: openMixer });
   items.push({ cls: 'set', html: `${CC_ICONS.settings}<div class="d">Настройки</div>`, ok: () => { closeCC(); openSettings(); } });
+  items.push({ cls: 'set', html: `${CC_ICONS.minimize}<div class="d">Свернуть</div>`, ok: minimizeLauncher });
   items.push({ cls: 'set', html: `${CC_ICONS.power}<div class="d">Питание</div>`, ok: () => { closeCC(); openPower(); } });
   cc.items = items;
   cc.idx = Math.min(cc.idx, items.length - 1);
@@ -305,6 +306,7 @@ function ccHandle(act) {
 }
 
 const CC_ICONS = {
+  minimize: '<svg class="ci" viewBox="0 0 24 24"><path d="M5 17h14v2H5zm7-2-6-7h4V4h4v4h4z"/></svg>',
   vol: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
   mute: '<svg class="ci" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4z"/></svg>',
   power: '<svg class="ci" viewBox="0 0 24 24"><path d="M11 2h2v10h-2zm6.4 3.2 1.4 1.4A8 8 0 1 1 5.2 6.6l1.4-1.4A6 6 0 1 0 17.4 5.2z"/></svg>',

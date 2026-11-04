@@ -38,10 +38,13 @@ let gameHwnd = null;   // window that was in front when the Guide button summone
 let ownHwnd = null;
 let gameStartedAt = 0; // when the current game was launched (to find its window)
 let quitting = false;
+let userMinimized = false; // minimised on purpose from the menu
 let coverTimer = null; // keeps us topmost while a game is starting
 
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => restoreWindow());
+// the window can already be gone while we're quitting (e.g. the updater relaunching us)
+const alive = () => !!win && !win.isDestroyed();
+app.on('second-instance', () => { if (!quitting) restoreWindow(); });
 
 function loadData() {
   try {
@@ -91,8 +94,11 @@ function createWindow() {
   win.on('blur', () => toOverlay({ type: 'focus', focused: false }));
   // never let the desktop show: if anything minimises us (Win+D, a game), come straight back
   win.on('minimize', () => {
-    if (!quitting) setTimeout(() => win && !win.isDestroyed() && win.restore(), 120);
+    // "Свернуть лаунчер" is the one minimise we keep; anything else (Win+D, a game) is undone
+    if (!quitting && !userMinimized) setTimeout(() => alive() && win.restore(), 120);
   });
+  win.on('restore', () => (userMinimized = false));
+  win.on('show', () => (userMinimized = false));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') {
@@ -162,7 +168,7 @@ ipcMain.on('overlay:visible', (_e, on) => {
 });
 
 function restoreWindow() {
-  if (!win) return;
+  if (!alive()) return;
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -171,14 +177,14 @@ function restoreWindow() {
 // Windows won't let a background app take focus on its own; briefly going topmost and letting the
 // gamepad helper (which can) activate our window gets us reliably in front of everything
 function forceFront(holdMs = 1500) {
-  if (!win) return;
+  if (!alive()) return;
   if (win.isMinimized()) win.restore();
   win.setAlwaysOnTop(true, 'screen-saver');
   win.show();
   win.moveTop();
   win.focus();
   if (ownHwnd) pad?.focus(ownHwnd);
-  if (holdMs) setTimeout(() => { if (!coverTimer) win.setAlwaysOnTop(false); }, holdMs);
+  if (holdMs) setTimeout(() => { if (!coverTimer && alive()) win.setAlwaysOnTop(false); }, holdMs);
 }
 
 function gameEnded() {
@@ -243,12 +249,12 @@ ipcMain.handle('exe:icon', async (_e, exe) => {
 // While a game is starting, keep re-asserting topmost: Steam's dialogs and some game launchers make
 // themselves topmost too, and the last one to do so wins
 ipcMain.handle('win:cover', (_e, on) => {
-  if (!win) return;
+  if (!alive()) return;
   clearInterval(coverTimer);
   coverTimer = null;
   if (on) {
     forceFront(0);
-    coverTimer = setInterval(() => { win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); }, 600);
+    coverTimer = setInterval(() => { if (alive()) { win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); } }, 600);
   } else {
     win.setAlwaysOnTop(false);
   }
@@ -256,7 +262,7 @@ ipcMain.handle('win:cover', (_e, on) => {
 // The launcher is the base layer of the screen, like the PS5 shell: it is never minimised.
 // Once the game is up we stop being topmost and put the game's window above us; the desktop never shows.
 ipcMain.handle('win:stepAside', (_e, launchedAt) => {
-  if (!win) return;
+  if (!alive()) return;
   clearInterval(coverTimer);
   coverTimer = null;
   win.setAlwaysOnTop(false);
@@ -264,9 +270,17 @@ ipcMain.handle('win:stepAside', (_e, launchedAt) => {
   gameStartedAt = launchedAt || Date.now();
   pad?.focusNew(gameStartedAt);
 });
+ipcMain.handle('win:minimize', () => {
+  if (!alive()) return;
+  clearInterval(coverTimer);
+  coverTimer = null;
+  userMinimized = true;
+  win.setAlwaysOnTop(false);
+  win.minimize();
+});
 // "Back to game": activate the game's window above us
 ipcMain.handle('win:returnToGame', () => {
-  if (!win) return;
+  if (!alive()) return;
   clearInterval(coverTimer);
   coverTimer = null;
   win.setAlwaysOnTop(false);
@@ -417,13 +431,16 @@ app.whenReady().then(() => {
       // the window that was in front when Guide was pressed — normally the game
       const prev = ev.split(' ')[1];
       if (prev && prev !== '0' && prev !== hwnd) gameHwnd = prev;
+      // minimised or in the tray: Home just brings the launcher back; over a game it also opens the menu
+      const wasAway = userMinimized || !alive() || win.isMinimized() || !win.isVisible();
       restoreWindow();
-      send('pad:guide', { from: 'background', canReturn: !!gameHwnd });
+      if (!wasAway) send('pad:guide', { from: 'background', canReturn: !!gameHwnd });
     } else if (ev === 'toggle') send('pad:guide', { from: 'front', canReturn: !!gameHwnd });
   });
   app.on('will-quit', () => pad.stop());
   // keyboard equivalent of the Guide button, from anywhere
   globalShortcut.register('Control+Alt+Home', () => {
+    if (!alive() || quitting) return;
     if (win.isFocused()) return send('pad:guide', { from: 'front', canReturn: !!gameHwnd });
     forceFront();
     send('pad:guide', { from: 'background', canReturn: !!gameHwnd });

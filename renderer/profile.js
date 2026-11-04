@@ -353,9 +353,18 @@ function openCustomTimer() {
   };
 }
 
+function minimizeLauncher() {
+  closeModal();
+  if (typeof closeCC === 'function' && cc.open) closeCC();
+  ipc.minimize();
+  // once we're no longer focused, this lands in the overlay above the desktop
+  setTimeout(() => toast('Нажмите кнопку Home (Xbox) на геймпаде или Ctrl+Alt+Home, чтобы вернуть его', false, { title: 'Лаунчер свёрнут', icon: '🎮', ms: 6000 }), 600);
+}
+
 // ---------- power ----------
 function openPower() {
   openModal(`<h2 style="padding:10px 18px 0">Питание</h2>
+    <button class="menu-item focusable" data-p="minimize">${POWER_ICONS.min}Свернуть лаунчер<span class="val">Home — развернуть</span></button>
     <button class="menu-item focusable" data-p="timer">${POWER_ICONS.timer}Таймер выключения<span class="val">${sleepTimer.at ? fmtLeft(timerLeft()) : ''}</span></button>
     <button class="menu-item focusable" data-p="sleep">${POWER_ICONS.sleep}Спящий режим</button>
     <button class="menu-item focusable" data-p="restart">${POWER_ICONS.restart}Перезагрузить ПК</button>
@@ -365,6 +374,7 @@ function openPower() {
   $$('#modal .menu-item').forEach((b) => (b.onclick = () => {
     const p = b.dataset.p;
     if (p === 'timer') return openSleepTimer();
+    if (p === 'minimize') return minimizeLauncher();
     if (p === 'shutdown' || p === 'restart') return powerCountdown(p);
     closeModal();
     ipc.power(p);
@@ -387,6 +397,7 @@ function powerCountdown(action) {
   draw();
 }
 const POWER_ICONS = {
+  min: '<svg class="mi" viewBox="0 0 24 24"><path d="M5 17h14v2H5zM12 5l6 7h-4v3h-4v-3H6z" transform="rotate(180 12 12)"/></svg>',
   timer: '<svg class="mi" viewBox="0 0 24 24"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4c-.4-.5-.9-1-1.4-1.4L17.6 6A9 9 0 1 0 19 7.4zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>',
   sleep: '<svg class="mi" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>',
   restart: '<svg class="mi" viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.8-4.3L14 10h6V4l-2.3 2.3A8 8 0 0 0 12 4z"/></svg>',
