@@ -14,7 +14,9 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+mod pages;
 mod run;
+pub use pages::fmt_date;
 use run::Launching;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,13 @@ pub struct App {
     last_launch: Option<SystemTime>,
     /// last time the launch splash re-asserted "always on top"
     covered_at: Instant,
+
+    // ---- pages below the home screen ----
+    pages: pages::Pages,
+    media_tx: std::sync::mpsc::Sender<crate::media::MediaCmd>,
+    /// set while a game has the screen: background polling pauses
+    idle: Arc<std::sync::atomic::AtomicBool>,
+    steam_user_local: Option<String>,
 }
 
 impl App {
@@ -98,7 +107,9 @@ impl App {
         let lib = Library::load();
         let splash = lib.setting_bool("splash", true);
         let fullscreen = lib.setting_bool("fullscreen", true);
-        let (_, steam_stats) = steam::local_stats();
+        let (steam_user_local, steam_stats) = steam::local_stats();
+        let (media_tx, media_rx) = crate::media::channel();
+        let idle = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (tx, events) = std::sync::mpsc::channel();
         let bus = crate::watch::Bus::new(tx, cc.egui_ctx.clone());
         let own = Arc::new(AtomicIsize::new(0));
@@ -106,6 +117,10 @@ impl App {
         crate::watch::start_hotkey(bus.clone(), own.clone());
         crate::watch::start_steam(bus.clone());
         let steam_now = crate::watch::steam_running_now();
+        {
+            let bus = bus.clone();
+            crate::media::start(cc.egui_ctx.clone(), media_rx, idle.clone(), move |m| bus.send(crate::watch::Event::Music(m)));
+        }
         let mut app = Self {
             games: Vec::new(),
             art: HashMap::new(),
@@ -139,6 +154,10 @@ impl App {
             reload_steam_at: None,
             last_launch: None,
             covered_at: Instant::now(),
+            pages: Default::default(),
+            media_tx,
+            idle,
+            steam_user_local,
             lib,
         };
         // a Steam game that was already running when OTIUM started
@@ -201,10 +220,17 @@ impl App {
         if nav == Nav::Guide {
             return self.guide_pressed();
         }
+        // a press that opened a menu must not also pick its first item (double taps, key bounce)
+        if nav == Nav::Ok && self.modal.is_some() && self.modal_at.elapsed() < Duration::from_millis(300) {
+            return;
+        }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
             self.apply(action, frame);
             return;
+        }
+        if self.pages.page != 0 && !matches!(nav, Nav::Add | Nav::Options) {
+            return self.handle_page(nav);
         }
         let n = self.games.len();
         match (self.zone, nav) {
@@ -217,6 +243,7 @@ impl App {
             (Zone::Play, Nav::Right) => self.zone = Zone::More,
             (Zone::More, Nav::Left) => self.zone = Zone::Play,
             (Zone::Play | Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
+            (Zone::Play | Zone::More, Nav::Down) => self.go_page(1),
             (Zone::More, Nav::Ok) | (_, Nav::Options) => {
                 if let Some(g) = self.games.get(self.sel) {
                     let (game, running) = (g.name.clone(), self.is_running(g));
@@ -250,6 +277,13 @@ impl App {
                 self.modal = None;
                 if let Some(g) = self.games.get(self.sel).cloned() {
                     self.close_game(Some(g));
+                }
+            }
+            Action::OpenUrl(url) => {
+                if std::env::var_os("OTIUM_NO_OPEN").is_some() {
+                    eprintln!("open url (suppressed): {url}");
+                } else if url.starts_with("https://") || url.starts_with("steam://") {
+                    let _ = open::that_detached(&url);
                 }
             }
             Action::Control(c) => {
@@ -482,6 +516,8 @@ impl eframe::App for App {
             self.on_event(e);
         }
         self.tick(ctx);
+        self.tick_pages();
+        self.idle.store(self.away_for_game, Ordering::Relaxed);
         let navs = self.input.poll(ctx);
 
         if ctx.input(|i| crate::input::key_pressed(i, egui::Key::F11)) {
@@ -502,6 +538,9 @@ impl eframe::App for App {
             }
         } else {
             for nav in navs {
+                if std::env::var_os("OTIUM_NO_OPEN").is_some() {
+                    eprintln!("nav {nav:?} page={} modal={}", self.pages.page, self.modal.is_some());
+                }
                 // the launch splash takes B / Esc to hide itself; everything else waits
                 if self.launching.is_some() {
                     if nav == Nav::Back {
@@ -598,12 +637,17 @@ impl App {
                 white(0.65 * appear),
             );
         } else {
-            self.paint_row(ui, rect, s, dt, appear);
+            let oy = -self.pages.pos * rect.height();
+            if oy > -rect.height() {
+                self.paint_row(ui, rect, s, dt, appear, oy);
+            }
+            self.paint_pages(ui, rect, s, dt);
         }
 
-        let hints: Vec<(usize, &str)> = match &self.modal {
-            Some(m) => m.hints(),
-            None => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
+        let hints: Vec<(usize, &str)> = match (&self.modal, self.pages.page) {
+            (Some(m), _) => m.hints(),
+            (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
+            (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
         self.paint_hints(ui, rect, s, &hints);
 
@@ -614,17 +658,17 @@ impl App {
         self.paint_toast(ui, rect, s);
     }
 
-    fn paint_row(&mut self, ui: &egui::Ui, rect: Rect, s: f32, dt: f32, appear: f32) {
+    fn paint_row(&mut self, ui: &egui::Ui, rect: Rect, s: f32, dt: f32, appear: f32, oy: f32) {
         // the selected tile stays at the left edge, the rest scroll past it
         let tile = 116.0 * s;
         let big = 164.0 * s;
         let gap = 20.0 * s;
         let left = 96.0 * s;
-        let row_y = 150.0 * s;
+        let row_y = 150.0 * s + oy;
         let k = 1.0 - (-dt * 16.0).exp();
         self.scroll += (self.sel as f32 - self.scroll) * k;
 
-        let in_row = self.zone == Zone::Row && self.modal.is_none();
+        let in_row = self.zone == Zone::Row && self.modal.is_none() && self.pages.page == 0;
         for (i, g) in self.games.iter().enumerate() {
             let d = i as f32 - self.scroll;
             // the selected slot is wider, so tiles after it shift right by the difference
@@ -654,14 +698,14 @@ impl App {
         }
 
         // ---- title art, Play button, info ----
-        let info_y = rect.height() * 0.50;
+        let info_y = rect.height() * 0.50 + oy;
         let logo_box = Rect::from_min_size(pos2(left, info_y - 190.0 * s), vec2(560.0 * s, 180.0 * s));
         if draw::contain_left(ui, &art.logos, logo_box, white(appear)).is_none() {
             ui.painter().text(logo_box.left_bottom(), Align2::LEFT_BOTTOM, &g.name, bold(64.0 * s), white(appear));
         }
 
         let btn = Rect::from_min_size(pos2(left, info_y + 20.0 * s), vec2(280.0 * s, 68.0 * s));
-        let no_modal = self.modal.is_none();
+        let no_modal = self.modal.is_none() && self.pages.page == 0;
         let play_focus = self.zone == Zone::Play && no_modal;
         let p = ui.painter();
         if play_focus {
@@ -711,6 +755,11 @@ impl App {
             let e = ease_out(t);
             let a = (e * 150.0) as u8;
             draw::cover(ui, &cur, rect, 0.0, Color32::from_rgba_unmultiplied(a, a, a, (e * 255.0) as u8), (0.5, 0.3));
+        }
+        // the pages below the home screen sit on a darker background
+        let down = self.pages.pos.min(1.0);
+        if down > 0.0 {
+            p.rect_filled(rect, 0.0, black(0.6 * down));
         }
         // keep text readable: darken the top, the bottom and the left side
         let h = rect.height();

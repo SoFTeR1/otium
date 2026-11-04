@@ -21,6 +21,12 @@ pub enum Event {
     GameWindow { hwnd: isize },
     /// a message from background work (closing a game)
     Toast { text: String, error: bool },
+    /// news / trophies of a Steam game arrived
+    News { appid: String, items: Vec<crate::steam_api::News> },
+    Trophies { appid: String, res: Result<crate::steam_api::Trophies, crate::steam_api::ApiError> },
+    FeedDone { appid: String },
+    /// what's playing changed (None = nothing)
+    Music(Option<crate::media::Music>),
 }
 
 /// Sends events to the UI and wakes it up.

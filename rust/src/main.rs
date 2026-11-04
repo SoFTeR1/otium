@@ -8,6 +8,8 @@ mod input;
 mod launch;
 mod modal;
 mod steam;
+mod media;
+mod steam_api;
 mod thumbs;
 mod watch;
 mod win;

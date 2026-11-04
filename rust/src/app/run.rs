@@ -250,6 +250,7 @@ impl App {
                     }
                     // Steam writes its own playtime a moment after the game closes
                     self.reload_steam_at = Some(Instant::now() + Duration::from_secs(6));
+                    self.trophies_changed(prev);
                 }
                 if id != 0 {
                     self.steam_since.insert(id, at);
@@ -282,6 +283,7 @@ impl App {
             }
             Event::GuideToggle => self.guide_pressed(),
             Event::Toast { text, error } => self.toast(&text, error),
+            e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }
 

@@ -15,6 +15,8 @@ pub enum Modal {
     Control { focus: usize, items: Vec<(CtlAction, &'static str)> },
     ConfirmDelete { focus: usize, game: String },
     Message { title: String, text: String },
+    News { news: crate::steam_api::News, game: String, fallback: Vec<String>, scroll: f32 },
+    Trophies { title: String, items: Vec<crate::steam_api::Achievement>, focus: usize, scroll: f32 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,6 +38,7 @@ pub enum Action {
     MakeFirst,
     AskDelete,
     Delete,
+    OpenUrl(String),
 }
 
 const ADD_ITEMS: [&str; 2] = ["Импорт игр из Steam", "Выбрать exe или ярлык…"];
@@ -56,7 +59,8 @@ impl Modal {
             Modal::Control { items, .. } => items.len(),
             Modal::ConfirmDelete { .. } => CONFIRM_ITEMS.len(),
             Modal::Import { list, .. } => list.len() + 1,
-            Modal::Message { .. } => 1,
+            Modal::Message { .. } | Modal::News { .. } => 1,
+            Modal::Trophies { items, .. } => items.len(),
         }
     }
 
@@ -66,10 +70,11 @@ impl Modal {
             | Modal::Options { focus, .. }
             | Modal::ConfirmDelete { focus, .. }
             | Modal::Import { focus, .. }
-            | Modal::Control { focus, .. } => {
+            | Modal::Control { focus, .. }
+            | Modal::Trophies { focus, .. } => {
                 Some(focus)
             }
-            Modal::Message { .. } => None,
+            Modal::Message { .. } | Modal::News { .. } => None,
         }
     }
 
@@ -90,6 +95,20 @@ impl Modal {
         }
         if nav == Nav::Back {
             return Action::Close;
+        }
+        if let Modal::News { news, scroll, .. } = self {
+            return match nav {
+                Nav::Up => {
+                    *scroll = (*scroll - 160.0).max(0.0);
+                    Action::None
+                }
+                Nav::Down => {
+                    *scroll += 160.0;
+                    Action::None
+                }
+                Nav::Ok if !news.url.is_empty() => Action::OpenUrl(news.url.clone()),
+                _ => Action::None,
+            };
         }
         match self {
             Modal::Add { focus } if nav == Nav::Ok => match focus {
@@ -142,6 +161,8 @@ impl Modal {
             Modal::Import { focus, list, .. } if *focus < list.len() => vec![(0, "Отметить"), (2, "Выбрать все"), (1, "Назад")],
             Modal::Import { .. } => vec![(0, "Импортировать"), (2, "Выбрать все"), (1, "Назад")],
             Modal::Message { .. } => vec![(0, "OK")],
+            Modal::News { .. } => vec![(0, "Открыть в браузере"), (1, "Закрыть")],
+            Modal::Trophies { .. } => vec![(1, "Закрыть")],
             _ => vec![(0, "Выбрать"), (1, "Назад")],
         }
     }
@@ -187,6 +208,43 @@ impl Modal {
                 ui.painter().galley(r.left_top() + vec2(8.0 * s, 0.0), galley, Color32::WHITE);
                 let ok = Rect::from_min_size(pos2(r.left(), r.bottom() - ROW * s), vec2(r.width(), ROW * s));
                 rows(ui, ok, s, &["OK"], 0, appear);
+            }
+            Modal::News { news, game, fallback, scroll } => paint_news(ui, screen, s, appear, news, game, fallback, scroll),
+            Modal::Trophies { title, items, focus, scroll } => {
+                let visible = 7.min(items.len().max(1));
+                let r = panel(ui, screen, s, 900.0, title, visible, appear);
+                let target = (*focus as f32 - (visible as f32 - 2.0)).clamp(0.0, items.len().saturating_sub(visible) as f32);
+                *scroll += (target - *scroll) * (1.0 - (-dt * 18.0).exp());
+                let clip = ui.painter().with_clip_rect(r);
+                for (i, a) in items.iter().enumerate() {
+                    let y = r.top() + (i as f32 - *scroll) * ROW * s;
+                    if y + ROW * s < r.top() || y > r.bottom() {
+                        continue;
+                    }
+                    let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    let f = i == *focus;
+                    if f {
+                        clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
+                    }
+                    let dim = if a.achieved { 1.0 } else { 0.5 };
+                    let fg = if f { Color32::from_rgb(10, 12, 18) } else { white(dim * appear) };
+                    let side = row.height() - 12.0 * s;
+                    let icon = Rect::from_min_size(pos2(row.left() + 10.0 * s, row.top() + 6.0 * s), vec2(side, side));
+                    if r.contains_rect(icon) {
+                        let uris: Vec<String> = a.icon.iter().cloned().collect();
+                        draw::cover(ui, &uris, icon, 6.0 * s, white(appear), (0.5, 0.5));
+                    }
+                    let tx = icon.right() + 16.0 * s;
+                    clip.text(pos2(tx, row.top() + 8.0 * s), Align2::LEFT_TOP, &a.name, semibold(19.0 * s), fg);
+                    let desc: String = a.desc.chars().take(90).collect();
+                    clip.text(pos2(tx, row.bottom() - 8.0 * s), Align2::LEFT_BOTTOM, desc, font(15.0 * s), fg.gamma_multiply(0.7));
+                    let val = if a.achieved {
+                        crate::app::fmt_date(a.time)
+                    } else {
+                        a.percent.map(|p| format!("{p:.1}%")).unwrap_or_default()
+                    };
+                    clip.text(pos2(row.right() - 14.0 * s, row.center().y), Align2::RIGHT_CENTER, val, font(16.0 * s), fg.gamma_multiply(0.8));
+                }
             }
             Modal::Import { list, picked, focus, scroll } => {
                 let visible = IMPORT_VISIBLE.min(list.len());
@@ -277,4 +335,38 @@ fn rows(ui: &egui::Ui, r: Rect, s: f32, items: &[&str], focus: usize, a: f32) {
         };
         p.text(pos2(row.left() + 20.0 * s, row.center().y), Align2::LEFT_CENTER, *label, semibold(22.0 * s), color);
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_news(ui: &egui::Ui, screen: Rect, s: f32, a: f32, n: &crate::steam_api::News, game: &str, fallback: &[String], scroll: &mut f32) {
+    let w = 1100.0 * s;
+    let r = Rect::from_center_size(screen.center() + vec2(0.0, (1.0 - a) * 24.0 * s), vec2(w, screen.height() - 120.0 * s));
+    let p = ui.painter();
+    let cr = CornerRadius::same((24.0 * s) as u8);
+    draw::glow(p, r, 24.0 * s, Color32::BLACK, 40.0 * s, 0.8 * a);
+    p.rect_filled(r, cr, Color32::from_rgb(22, 26, 36).gamma_multiply(a));
+    let hero = Rect::from_min_size(r.min, vec2(w, 300.0 * s));
+    let mut uris: Vec<String> = n.image.iter().cloned().collect();
+    uris.extend(fallback.iter().cloned());
+    draw::cover(ui, &uris, hero, 24.0 * s, white(a), (0.5, 0.3));
+    let bg = Color32::from_rgb(22, 26, 36).gamma_multiply(a);
+    draw::vgradient(p, Rect::from_min_max(pos2(hero.left(), hero.bottom() - 120.0 * s), hero.max), Color32::TRANSPARENT, bg);
+    let pad = 40.0 * s;
+    let meta = [game.to_string(), n.feed.clone(), crate::app::fmt_date(n.date)]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    p.text(pos2(r.left() + pad, hero.bottom() + 10.0 * s), Align2::LEFT_TOP, meta, font(18.0 * s), white(0.6 * a));
+    let title = p.layout(n.title.clone(), bold(32.0 * s), white(a), w - pad * 2.0);
+    let ty = hero.bottom() + 40.0 * s;
+    let title_h = title.size().y;
+    p.galley(pos2(r.left() + pad, ty), title, Color32::WHITE);
+    let body_top = ty + title_h + 20.0 * s;
+    let body = Rect::from_min_max(pos2(r.left() + pad, body_top), pos2(r.right() - pad, r.bottom() - pad));
+    let text = if n.text.is_empty() { "Текст новости недоступен — откройте её в браузере.".to_string() } else { n.text.clone() };
+    let galley = p.layout(text, font(20.0 * s), white(0.85 * a), body.width());
+    let max = (galley.size().y - body.height()).max(0.0);
+    *scroll = scroll.min(max);
+    p.with_clip_rect(body).galley(body.min - vec2(0.0, *scroll), galley, Color32::WHITE);
 }
