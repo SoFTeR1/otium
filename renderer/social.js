@@ -368,7 +368,7 @@ function renderSocial() {
       <div class="schat-head">
         <div class="hav">${avatar(pk, nameOf(pk))}<i class="pres ${p.online ? (p.game ? 'game' : 'on') : ''}"></i></div>
         <div class="hname"><div class="t">${esc(nameOf(pk))}</div><div class="d ${p.game ? 'game' : ''}">${esc(p.text)}</div></div>
-        ${inThisCall ? '' : `<button class="hbtn call" id="sCall" title="Позвонить (${GLYPHS[currentLayout()].menu[0]})">${CALL_ICONS.phone}</button>`}
+        ${inThisCall ? '' : `<button class="callpill" id="sCall">${CALL_ICONS.phone}<span>Позвонить</span><i class="g ${GLYPHS[currentLayout()].menu[1]}">${GLYPHS[currentLayout()].menu[0]}</i></button>`}
       </div>
       ${callStageHTML(pk)}
       <div class="smsgs" id="smsgs">${msgs.length ? messageGroups(msgs) : `<div class="schat-hello">${avatar(pk, nameOf(pk), 'big')}<div class="t">${esc(nameOf(pk))}</div><div class="d">Это начало вашей переписки. Скажите привет 👋</div></div>`}</div>

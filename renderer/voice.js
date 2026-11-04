@@ -25,18 +25,37 @@ function callUI() {
   if (call.state === 'idle') { el.innerHTML = ''; return; }
   const name = nameOf(call.pk);
   if (call.state === 'incoming' || call.state === 'outgoing' || call.state === 'connecting') {
-    const sub = { incoming: 'Входящий звонок', outgoing: 'Звоним…', connecting: 'Соединяем…' }[call.state];
-    el.innerHTML = `<div class="call-card">
-      <div class="call-av">${avatar(call.pk, name, 'big')}<i class="ring1"></i><i class="ring2"></i></div>
-      <div class="call-sub">${sub}</div><div class="call-name">${esc(name)}</div>
-      <div class="call-btns">
-        ${call.state === 'incoming' ? `<button class="cbtn accept" id="cAccept">${CALL_ICONS.phone}<span>Принять</span></button>` : ''}
-        <button class="cbtn hang" id="cHang">${CALL_ICONS.hang}<span>${call.state === 'incoming' ? 'Отклонить' : 'Отменить'}</span></button>
-      </div>
-      <div class="call-hint">${call.state === 'incoming' ? `${oskHint('ok', 'принять')} ${oskHint('back', 'отклонить')}` : oskHint('back', 'отменить')}</div>
-    </div>`;
+    const incoming = call.state === 'incoming';
+    const status = { incoming: 'Входящий звонок', outgoing: 'Звоним', connecting: 'Соединяем' }[call.state];
+    const p = presenceOf(call.pk);
+    const h = hue(call.pk);
+    const glyph = (k) => { const g = GLYPHS[currentLayout()][k]; return `<i class="g ${g[1]}">${g[0]}</i>`; };
+    el.style.setProperty('--h', h);
+    el.innerHTML = `
+      <div class="cs-glow"></div>
+      <div class="cs">
+        <div class="cs-kicker"><span class="cs-live"></span>Голосовой звонок · PS5 Launcher</div>
+        <div class="cs-av">
+          <i class="w w1"></i><i class="w w2"></i><i class="w w3"></i>
+          ${avatar(call.pk, name, 'big')}
+          ${incoming ? '' : `<span class="cs-mic ${call.muted ? 'off' : ''}">${call.muted ? CALL_ICONS.micOff : CALL_ICONS.mic}</span>`}
+        </div>
+        <div class="cs-name">${esc(name)}</div>
+        <div class="cs-status">${status}<span class="cs-dots"><i>.</i><i>.</i><i>.</i></span><b id="csWait">0:00</b></div>
+        <div class="cs-presence ${p.game ? 'game' : ''}">${p.online ? esc(p.text) : 'Не в сети — звонок дойдёт, когда друг откроет лаунчер'}</div>
+        <div class="cs-eq">${'<i></i>'.repeat(16)}</div>
+        <div class="cs-actions">
+          ${incoming
+            ? `<button class="cs-btn yes" id="cAccept">${CALL_ICONS.phone}<span>Принять</span>${glyph('ok')}</button>
+               <button class="cs-btn no" id="cHang">${CALL_ICONS.hang}<span>Отклонить</span>${glyph('back')}</button>`
+            : `<button class="cs-btn ghost ${call.muted ? 'off' : ''}" id="cMic">${call.muted ? CALL_ICONS.micOff : CALL_ICONS.mic}<span>${call.muted ? 'Микрофон выкл.' : 'Микрофон'}</span>${glyph('menu')}</button>
+               <button class="cs-btn no" id="cHang">${CALL_ICONS.hang}<span>Отменить</span>${glyph('back')}</button>`}
+        </div>
+      </div>`;
     $('#cAccept') && ($('#cAccept').onclick = acceptCall);
-    $('#cHang').onclick = () => (call.state === 'incoming' ? declineCall() : hangUp());
+    $('#cMic') && ($('#cMic').onclick = toggleMic);
+    $('#cHang').onclick = () => (incoming ? declineCall() : hangUp());
+    tickWait();
     return;
   }
   // active: a compact pill at the top (hidden while the chat with this friend shows the full call stage)
@@ -100,6 +119,15 @@ function tickTimer() {
   for (const id of ['cTimer', 'cTimer2']) { const t = document.getElementById(id); if (t) t.textContent = txt; }
 }
 setInterval(tickTimer, 1000);
+
+// how long we've been ringing, on the call screen
+function tickWait() {
+  const t = document.getElementById('csWait');
+  if (!t || !call.ringStartedAt) return;
+  const s = Math.floor((Date.now() - call.ringStartedAt) / 1000);
+  t.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+setInterval(tickWait, 500);
 
 function pushOverlay() {
   ipc.overlaySend({
@@ -174,7 +202,7 @@ function newPeer(caller) {
       call.state = 'active';
       call.startedAt = Date.now();
       stopRing();
-      tone(660, 0.12, 0.05); tone(990, 0.15, 0.04, 'sine', 0.1);
+      callSound.connect();
       callUI();
     } else if (pc.connectionState === 'failed') {
       toast('Не удалось соединиться напрямую. Чаще всего так бывает, когда у обоих провайдер раздаёт адреса «за общим NAT».', true, { title: 'Звонок не соединился', ms: 8000 });
@@ -309,7 +337,7 @@ function endLocal(msg) {
   closeCallMenu();
   callUI();
   if (msg && pk) toast(msg, false, { title: 'Звонок', avatar: { name: nameOf(pk), key: pk } });
-  tone(520, 0.12, 0.04); tone(390, 0.18, 0.04, 'sine', 0.1);
+  callSound.end();
 }
 
 // ---------- controls ----------
@@ -323,7 +351,7 @@ function toggleMic() {
   if (!call.muted && call.deafened) { call.deafened = false; applyGain(); }
   setMicEnabled();
   sendState();
-  tone(call.muted ? 500 : 800, 0.06, 0.04);
+  callSound.click(!call.muted);
   callUI();
 }
 // "Выключить звук": stop hearing the friend; also mutes the mic, like Discord's deafen
@@ -335,7 +363,7 @@ function toggleDeafen() {
   setMicEnabled();
   applyGain();
   sendState();
-  tone(call.deafened ? 450 : 750, 0.06, 0.04);
+  callSound.click(!call.deafened);
   callUI();
 }
 function applyGain() {
@@ -408,18 +436,72 @@ function callMenuKey(act) {
   return true;
 }
 
-// ---------- ringtone ----------
+// ---------- call sounds: a tiny bell synth (sine + inharmonic partials, soft attack, a touch of echo) ----------
+// These ring even when UI sounds are off — a call you can't hear is a missed call.
+const callSound = (() => {
+  let out = null;
+  function bus() {
+    if (out) return out;
+    actx ??= new AudioContext();
+    const master = actx.createGain();
+    master.gain.value = 0.9;
+    const comp = actx.createDynamicsCompressor();
+    // short feedback echo gives the notes some air
+    const delay = actx.createDelay();
+    delay.delayTime.value = 0.18;
+    const fb = actx.createGain();
+    fb.gain.value = 0.22;
+    const wet = actx.createGain();
+    wet.gain.value = 0.35;
+    const lp = actx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 5200;
+    master.connect(lp).connect(comp).connect(actx.destination);
+    master.connect(delay).connect(fb).connect(delay);
+    delay.connect(wet).connect(lp);
+    out = master;
+    return out;
+  }
+  const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12); // MIDI note → Hz
+  function bell(midi, at, { dur = 1.2, vol = 0.12, attack = 0.008, partials = [[1, 1], [2.01, 0.28], [3.98, 0.08], [5.4, 0.03]] } = {}) {
+    const dest = bus();
+    actx.resume();
+    const t = actx.currentTime + at;
+    const f = NOTE(midi);
+    for (const [mult, amp] of partials) {
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.type = 'sine';
+      o.frequency.value = f * mult;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(vol * amp, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur / Math.sqrt(mult));
+      o.connect(g).connect(dest);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+  }
+  const marimba = { dur: 0.9, vol: 0.13, partials: [[1, 1], [3.99, 0.22], [9.9, 0.04]] };
+  const soft = { dur: 1.6, vol: 0.07, attack: 0.09, partials: [[1, 1], [2, 0.12]] };
+  return {
+    // incoming: a friendly marimba phrase
+    ring() { [[79, 0], [83, 0.14], [86, 0.28], [83, 0.56], [86, 0.7]].forEach(([n, at]) => bell(n, at, marimba)); },
+    // outgoing ringback: two calm, rounded notes
+    ringback() { bell(69, 0, soft); bell(76, 0.42, soft); },
+    // connected: rising sparkle
+    connect() { [[76, 0], [80, 0.07], [83, 0.14], [88, 0.21]].forEach(([n, at]) => bell(n, at, { dur: 1.1, vol: 0.1 })); },
+    // ended: gentle fall
+    end() { bell(76, 0, { dur: 0.9, vol: 0.09 }); bell(69, 0.16, { dur: 1.2, vol: 0.09 }); },
+    click(on) { bell(on ? 84 : 77, 0, { dur: 0.25, vol: 0.06, partials: [[1, 1]] }); }
+  };
+})();
+
 function startRing(incoming) {
   stopRing();
-  const once = () => {
-    const was = data.settings.sounds;
-    data.settings.sounds = true; // a ringtone should ring even with UI sounds off
-    if (incoming) { tone(880, 0.25, 0.06); tone(1100, 0.25, 0.06, 'sine', 0.3); }
-    else tone(440, 0.6, 0.035);
-    data.settings.sounds = was;
-  };
+  call.ringStartedAt = Date.now();
+  const once = () => (incoming ? callSound.ring() : callSound.ringback());
   once();
-  call.ring = setInterval(once, incoming ? 1600 : 2600);
+  call.ring = setInterval(once, incoming ? 2400 : 3200);
 }
 function stopRing() {
   clearInterval(call.ring);
@@ -433,6 +515,7 @@ function callHandle(act) {
     if (act === 'ok') return acceptCall();
     if (act === 'back') return declineCall();
   } else if (act === 'back') return hangUp();
+  else if (act === 'menu') return toggleMic();
 }
 
 // buttons pressed in the overlay window (over a game)
