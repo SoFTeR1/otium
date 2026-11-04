@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -25,7 +25,8 @@ const DEFAULT_DATA = {
     user: 'Player', sounds: true, fullscreen: true, autostart: false,
     bgMode: 'game', wallpaper: '', liveTrailers: true, steamApiKey: '', steamId: '',
     // the shared "PS5 Launcher" Discord application — an app ID is public, everyone can use the same one
-    discordId: '1567308312947728414'
+    discordId: '1567308312947728414',
+    closeToTray: true
   }
 };
 
@@ -80,6 +81,12 @@ function createWindow() {
     }
   });
   win.setMenu(null);
+  // the close button / Alt+F4 hides to the tray instead of quitting (unless turned off in settings)
+  win.on('close', (e) => {
+    if (quitting || !loadData().settings.closeToTray) return;
+    e.preventDefault();
+    hideToTray();
+  });
   win.on('focus', () => toOverlay({ type: 'focus', focused: true }));
   win.on('blur', () => toOverlay({ type: 'focus', focused: false }));
   // never let the desktop show: if anything minimises us (Win+D, a game), come straight back
@@ -94,6 +101,36 @@ function createWindow() {
     }
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
   });
+}
+
+// ---------- Tray: closing the window keeps the launcher running (chat, calls, Guide button) ----------
+let tray = null;
+let trayHinted = false;
+function createTray() {
+  const img = nativeImage.createFromPath(path.join(__dirname, 'renderer', 'icon.png')).resize({ width: 32, height: 32 });
+  tray = new Tray(img);
+  tray.setToolTip('PS5 Launcher');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Открыть PS5 Launcher', click: () => forceFront() },
+    { label: 'Центр управления', click: () => { forceFront(); send('pad:guide', { from: 'background', canReturn: !!gameHwnd }); } },
+    { type: 'separator' },
+    { label: 'Выйти', click: () => { quitting = true; app.quit(); } }
+  ]));
+  tray.on('click', () => forceFront());
+}
+function hideToTray() {
+  clearInterval(coverTimer);
+  coverTimer = null;
+  win.setAlwaysOnTop(false);
+  win.hide();
+  if (!trayHinted) {
+    trayHinted = true;
+    tray?.displayBalloon({
+      iconType: 'info',
+      title: 'PS5 Launcher работает в трее',
+      content: 'Откройте его значком в трее, кнопкой Xbox на геймпаде или Ctrl+Alt+Home. Выйти — правой кнопкой по значку.'
+    });
+  }
 }
 
 // ---------- Overlay: a transparent, click-through, always-on-top window over every app ----------
@@ -370,6 +407,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => ['media', 'notifications', 'fullscreen'].includes(perm));
   createWindow();
   createOverlay();
+  createTray();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
   ownHwnd = hwnd;

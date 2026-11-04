@@ -967,6 +967,7 @@ function openSettings(focus = 0) {
     ['sounds', 'Звуки интерфейса', onoff(s.sounds)],
     ['fullscreen', 'Полноэкранный режим', onoff(s.fullscreen)],
     ['autostart', 'Запускать вместе с Windows', onoff(s.autostart)],
+    ['tray', 'При закрытии окна', s.closeToTray === false ? 'Выйти' : 'Свернуть в трей'],
     ['sep'],
     ['update', 'Проверить обновления', updateState.latest && updateState.status === 'available' ? `Доступна ${updateState.latest}` : `Версия ${appVersion}`],
     ['power', 'Питание', 'сон, перезагрузка, выключение', 'danger']
@@ -990,6 +991,11 @@ function openSettings(focus = 0) {
     if (id === 'sounds') return toggle('sounds');
     if (id === 'fullscreen') return toggle('fullscreen', ipc.setFullscreen);
     if (id === 'account') return openSteamAccount();
+    if (id === 'tray') {
+      s.closeToTray = s.closeToTray === false;
+      await save();
+      return openSettings(i);
+    }
     if (id === 'discord') {
       await toggleDiscord();
       return openSettings(i);
