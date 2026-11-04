@@ -23,6 +23,27 @@ pub fn bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("bold".into()))
 }
 
+/// When each loaded image was last drawn.
+static USED: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> = std::sync::Mutex::new(None);
+
+/// Drops images that haven't been drawn for `idle` (covers of games scrolled past, news pictures,
+/// the previous background): egui otherwise keeps every texture it ever loaded, and they pile up
+/// over a long session. Anything shown again is simply loaded again.
+pub fn forget_unused(ctx: &egui::Context, idle: std::time::Duration) {
+    let stale: Vec<String> = {
+        let mut used = USED.lock().unwrap();
+        let map = used.get_or_insert_with(Default::default);
+        let stale: Vec<String> = map.iter().filter(|(_, t)| t.elapsed() > idle).map(|(u, _)| u.clone()).collect();
+        for u in &stale {
+            map.remove(u);
+        }
+        stale
+    };
+    for u in stale {
+        ctx.forget_image(&u);
+    }
+}
+
 /// The first candidate that has loaded. Candidates that failed (404, missing file) are skipped;
 /// one still loading stops the search, so a better image isn't replaced by a fallback for a frame.
 pub fn texture(ctx: &egui::Context, uris: &[String], px: f32) -> Option<SizedTexture> {
@@ -30,7 +51,10 @@ pub fn texture(ctx: &egui::Context, uris: &[String], px: f32) -> Option<SizedTex
     let hint = SizeHint::Size(b, b);
     for uri in uris {
         match ctx.try_load_texture(uri, TEX, hint) {
-            Ok(egui::load::TexturePoll::Ready { texture }) => return Some(texture),
+            Ok(egui::load::TexturePoll::Ready { texture }) => {
+                USED.lock().unwrap().get_or_insert_with(Default::default).insert(uri.clone(), std::time::Instant::now());
+                return Some(texture);
+            }
             Ok(egui::load::TexturePoll::Pending { .. }) => return None,
             Err(_) => continue,
         }

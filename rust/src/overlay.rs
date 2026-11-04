@@ -157,7 +157,7 @@ impl Overlay {
             crate::win::pin_overlay(self.hwnd, mon, restack, &mut self.last_ex);
         }
         // the clock and the speaking rings move: keep drawing while it's up
-        ctx.request_repaint_after(Duration::from_millis(100));
+        ctx.request_repaint_after(Duration::from_millis(33)); // 30 fps: smooth slides, light on the game
         clicked
     }
 }

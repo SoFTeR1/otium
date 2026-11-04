@@ -70,6 +70,8 @@ pub struct App {
     timer: control::SleepTimer,
     /// game names looked up for Discord art this session
     art_searched: HashSet<String>,
+    /// last sweep of images that are no longer drawn
+    forget_at: Instant,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
@@ -172,6 +174,7 @@ impl App {
             overlay_demo_toasts: 0,
             timer: Default::default(),
             art_searched: HashSet::new(),
+            forget_at: Instant::now(),
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
@@ -621,7 +624,10 @@ fn now_ms() -> f64 {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(16));
+        // 60 fps only while OTIUM is in front: behind a game or in the tray a few frames a second
+        // are enough for timers and calls (events, the Guide button and the overlay wake it at once),
+        // and the GPU is left to the game
+        ctx.request_repaint_after(Duration::from_millis(if self.away() { 250 } else { 16 }));
         if self.own.load(Ordering::Relaxed) == 0 {
             self.own.store(own_hwnd(frame), Ordering::Relaxed);
         }
@@ -630,8 +636,22 @@ impl eframe::App for App {
         }
         self.tick(ctx);
         self.tick_timer();
+        if self.forget_at.elapsed() > Duration::from_secs(5) && std::env::var("OTIUM_MEM_EXP").ok().as_deref() != Some("tour-keep") {
+            self.forget_at = Instant::now();
+            draw::forget_unused(ctx, Duration::from_secs(30));
+        }
         self.debug_open_profile();
         self.debug_open_social();
+        // OTIUM_MEM_EXP=tour: walk through every game twice (loading every background and cover),
+        // then rest on the first one, to measure what is kept in memory afterwards
+        if std::env::var("OTIUM_MEM_EXP").is_ok_and(|v| v.starts_with("tour")) && self.splash_start.is_none() && !self.games.is_empty() {
+            let k = (self.started.elapsed().as_millis() / 500) as usize;
+            let n = self.games.len();
+            let want = if k < 2 * n { k % n } else { 0 };
+            if want != self.sel {
+                self.select(want);
+            }
+        }
         self.tick_pages();
         self.social_tick();
         self.calls_tick();
