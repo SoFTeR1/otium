@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, screen, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -384,6 +384,13 @@ app.whenReady().then(() => {
     } else if (ev === 'toggle') send('pad:guide', { from: 'front', canReturn: !!gameHwnd });
   });
   app.on('will-quit', () => pad.stop());
+  // keyboard equivalent of the Guide button, from anywhere
+  globalShortcut.register('Control+Alt+Home', () => {
+    if (win.isFocused()) return send('pad:guide', { from: 'front', canReturn: !!gameHwnd });
+    forceFront();
+    send('pad:guide', { from: 'background', canReturn: !!gameHwnd });
+  });
+  app.on('will-quit', () => globalShortcut.unregisterAll());
   steam.watchRunning((id, prev) => {
     send('steam:running', { id, prev, at: Date.now() });
     if (!id && prev) gameEnded();

@@ -1148,6 +1148,13 @@ function handle(act, src) {
     if (act === 'back' && launching) { sfx.back(); launching.cancel(); }
     return;
   }
+  // Home key = the Guide button: toggle the Control Center
+  if (act === 'guide') {
+    if (osk.open) closeOSK(false);
+    if (cc.open) { sfx.back(); return closeCC(); }
+    if (modal.open) closeModal();
+    return pollMusic().finally(openCC);
+  }
   if (osk.open) return oskHandle(act);
   if (callCardOpen()) return callHandle(act);
   if (act === 'lb') return;
@@ -1203,14 +1210,14 @@ function handle(act, src) {
 
 const KEYMAP = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-  Enter: 'ok', Escape: 'back', Backspace: 'back', ContextMenu: 'menu', Insert: 'add',
+  Enter: 'ok', Escape: 'back', Backspace: 'back', ContextMenu: 'menu', Insert: 'add', Home: 'guide',
   q: 'menu', 'й': 'menu', n: 'add', 'т': 'add'
 };
 window.addEventListener('keydown', (e) => {
   const act = KEYMAP[e.key] || KEYMAP[e.key.toLowerCase()];
   if (!act) return;
   const inInput = document.activeElement?.tagName === 'INPUT';
-  if (inInput && (act === 'left' || act === 'right' || act === 'menu' || act === 'add' || e.key === 'Backspace')) return;
+  if (inInput && (act === 'left' || act === 'right' || act === 'menu' || act === 'add' || act === 'guide' || e.key === 'Backspace')) return;
   e.preventDefault();
   document.body.classList.remove('no-cursor');
   handle(act, 'key');
