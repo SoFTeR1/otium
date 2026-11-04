@@ -34,6 +34,26 @@
     .ib.hang { background: #ef4444; }
     .ib.hang:hover { background: #f05252; }
 
+    /* ---- voice widget (top left, translucent, like the Discord overlay) ---- */
+    #voice { position: fixed; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 6px; opacity: 0; transform: translateX(-12px); transition: opacity 0.3s, transform 0.35s var(--ease); }
+    #voice.show { opacity: 0.92; transform: none; }
+    .vwrap { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: -8px; border-radius: 12px; text-align: left; transition: background 0.2s, box-shadow 0.2s; }
+    #voice:hover { opacity: 1; }
+    .vwrap:hover { background: rgba(17, 19, 24, 0.72); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+    .vopen { height: 0; overflow: hidden; opacity: 0; font-size: 12px; font-weight: 600; color: #8fc2ff; transition: height 0.2s, opacity 0.2s; }
+    .vwrap:hover .vopen { height: 18px; opacity: 1; }
+    .vrow { display: flex; align-items: center; gap: 8px; }
+    .vav { position: relative; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: 0 0 auto;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35); transition: box-shadow 0.1s; }
+    .vav.speaking { box-shadow: 0 0 0 2px #23a55a, 0 0 8px rgba(35, 165, 90, 0.7); }
+    .vname { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 6px; background: rgba(0, 0, 0, 0.55); font-size: 13px; font-weight: 600; color: #f2f3f5;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vname.dim { color: #b5bac1; }
+    .vname svg { width: 15px; height: 15px; fill: #f23f43; flex: 0 0 auto; }
+    .vhead { display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 5px; background: rgba(0, 0, 0, 0.45); font-size: 11px; font-weight: 600; color: #23a55a; width: max-content; }
+    .vhead i { width: 6px; height: 6px; border-radius: 50%; background: #23a55a; }
+    .vhead b { color: #b5bac1; font-weight: 500; font-variant-numeric: tabular-nums; }
+
     /* ---- incoming call (top right, like a Windows call toast) ---- */
     #incoming { position: fixed; top: 22px; right: 22px; width: 380px; transform: translateX(120%); transition: transform 0.45s var(--ease); }
     #incoming.show { transform: none; }
@@ -75,7 +95,7 @@
   </style>
 </head>
 <body>
-  <div id="pill"></div>
+  <div id="voice"></div>
   <div id="incoming"></div>
   <div id="toasts"></div>
   <script src="overlay.js"></script>

@@ -35,7 +35,7 @@ function renderCall() {
   const incoming = on && c.state === 'incoming';
   const active = on && c.state !== 'incoming';
   $('#incoming').classList.toggle('show', !!incoming);
-  $('#pill').classList.toggle('show', !!active);
+  $('#voice').classList.toggle('show', !!active);
   if (incoming) {
     $('#incoming').innerHTML = `<div class="card">
       <div class="top"><div class="av" style="${grad(c.key)}">${esc(c.name[0].toUpperCase())}</div>
@@ -44,14 +44,19 @@ function renderCall() {
       <div class="hint">или кнопка Xbox на геймпаде</div></div>`;
   }
   if (active) {
+    // Discord-style voice widget: who's in the call, who's talking, who's muted. No buttons — the call is
+    // controlled from the launcher; this stays fully click-through.
     const status = { outgoing: 'Звоним…', connecting: 'Соединяем…' }[c.state];
-    const remoteIcon = c.remote?.deafened ? ICON.headOff : c.remote?.muted ? ICON.micOff : '';
-    $('#pill').innerHTML = `<div class="pill">
-      <div class="av ${st.speaking.remote ? 'speaking' : ''}" style="${grad(c.key)}">${esc(c.name[0].toUpperCase())}${remoteIcon ? `<span class="st">${remoteIcon}</span>` : ''}</div>
-      <div class="who"><div class="t">${esc(c.name)}</div><div class="d" id="timer">${status || timer(c.startedAt)}</div></div>
-      <button class="ib ${c.muted ? 'off' : ''}" data-a="mute" title="Микрофон">${c.muted ? ICON.micOff : ICON.mic}</button>
-      <button class="ib ${c.deafened ? 'off' : ''}" data-a="deafen" title="Выключить звук">${c.deafened ? ICON.headOff : ICON.head}</button>
-      <button class="ib hang" data-a="hangup" title="Завершить">${ICON.hang}</button></div>`;
+    const icons = (p) => (p?.deafened ? ICON.headOff + ICON.micOff : p?.muted ? ICON.micOff : '');
+    const row = (key, name, speaking, p, cls) => `<div class="vrow">
+      <div class="vav ${speaking ? 'speaking' : ''}" data-who="${cls}" style="${grad(key)}">${esc((name || '?')[0].toUpperCase())}</div>
+      <div class="vname ${p?.deafened ? 'dim' : ''}">${esc(name)}${icons(p)}</div></div>`;
+    // the whole widget is one button: hovering wakes it up, clicking opens the call in the launcher
+    $('#voice').innerHTML = `<button class="vwrap" data-a="opencall">
+      <div class="vhead"><i></i>${status ? status : `Голосовой звонок <b id="timer">${timer(c.startedAt)}</b>`}</div>
+      ${row(c.selfKey || 'me', c.selfName || 'Вы', st.speaking.self, { muted: c.muted, deafened: c.deafened }, 'self')}
+      ${c.state === 'active' ? row(c.key, c.name, st.speaking.remote, c.remote, 'remote') : ''}
+      <div class="vopen">Открыть звонок в лаунчере ›</div></button>`;
   }
   document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => window.overlay.action(b.dataset.a)));
   syncVisible();
@@ -92,6 +97,7 @@ window.overlay.onMessage((m) => {
   else if (m.type === 'call') { st.call = m; renderCall(); }
   else if (m.type === 'speaking') {
     st.speaking = m;
-    document.querySelector('#pill .av')?.classList.toggle('speaking', !!m.remote);
+    document.querySelector('#voice [data-who="remote"]')?.classList.toggle('speaking', !!m.remote);
+    document.querySelector('#voice [data-who="self"]')?.classList.toggle('speaking', !!m.self);
   } else if (m.type === 'toast') showToast(m);
 });

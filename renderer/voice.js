@@ -89,8 +89,20 @@ function callAction(a) {
   else if (a === 'deafen') toggleDeafen();
   else if (a === 'menu') openCallMenu();
   else if (a === 'hangup') hangUp();
+  else if (a === 'opencall') openCallChat();
   else if (a === 'accept') acceptCall();
   else if (a === 'decline') declineCall();
+}
+
+// open the chat with the person we're talking to — its header shows the full call stage
+function openCallChat() {
+  if (!inCall()) return;
+  if (modal.open) closeModal();
+  if (cc.open) closeCC();
+  if (profileOpen()) closeProfile();
+  if (!socialOpen()) openSocial();
+  social.idx = listItems().findIndex((x) => x.pk === call.pk);
+  activateItem();
 }
 
 // big "voice stage" shown at the top of the chat with the friend we're talking to
@@ -132,6 +144,7 @@ setInterval(tickWait, 500);
 function pushOverlay() {
   ipc.overlaySend({
     type: 'call', state: call.state, key: call.pk, name: call.pk ? nameOf(call.pk) : '',
+    selfKey: me?.pk, selfName: acct()?.name || '',
     startedAt: call.startedAt, muted: call.muted, deafened: call.deafened, remote: call.remote
   });
 }

@@ -158,7 +158,11 @@ function createOverlay() {
 }
 const toOverlay = (m) => overlay && !overlay.isDestroyed() && overlay.webContents.send('overlay:msg', m);
 ipcMain.on('overlay:send', (_e, m) => toOverlay(m));
-ipcMain.on('overlay:action', (_e, a) => send('overlay:action', a));
+ipcMain.on('overlay:action', (_e, a) => {
+  // clicking the voice widget brings the launcher forward to the call
+  if (a === 'opencall') forceFront();
+  send('overlay:action', a);
+});
 ipcMain.on('overlay:interactive', (_e, on) => overlay?.setIgnoreMouseEvents(!on, { forward: true }));
 // only show the window while it has something on it, so it never sits over a game for nothing
 ipcMain.on('overlay:visible', (_e, on) => {
