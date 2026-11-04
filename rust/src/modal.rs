@@ -24,6 +24,8 @@ pub enum Modal {
     /// "find friends" results: (public key, name, state)
     Players { items: Vec<(String, String, String)>, focus: usize, scroll: f32 },
     FriendRequest { pk: String, name: String, focus: usize },
+    /// pick friends (for a group or a call): (public key, name, picked); the last row is "Готово"
+    Pick { title: String, items: Vec<(String, String, bool)>, focus: usize, scroll: f32, max: usize, purpose: crate::app::PickFor },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -34,6 +36,8 @@ pub enum SetMenu {
     Power,
     Profile,
     Friend,
+    Call,
+    Group,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -68,6 +72,17 @@ pub enum SetKey {
     ProfileLogout,
     FriendChat,
     FriendRemove,
+    FriendCall,
+    CallMute,
+    CallDeafen,
+    CallVolume,
+    CallNoise,
+    CallAdd,
+    CallHangup,
+    GroupVoice,
+    GroupInvite,
+    GroupRename,
+    GroupLeave,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +101,8 @@ pub enum CtlAction {
     Settings,
     Power,
     Social,
+    CallMenu,
+    AcceptCall,
 }
 
 pub enum Action {
@@ -106,6 +123,7 @@ pub enum Action {
     Confirmed(SetKey),
     RequestFriend(String, String),
     AnswerRequest(String, bool),
+    Picked(crate::app::PickFor, Vec<String>),
 }
 
 const ADD_ITEMS: [&str; 2] = ["Импорт игр из Steam", "Выбрать exe или ярлык…"];
@@ -131,6 +149,7 @@ impl Modal {
             Modal::Settings { items, .. } => items.len(),
             Modal::Confirm { .. } | Modal::FriendRequest { .. } => 2,
             Modal::Players { items, .. } => items.len(),
+            Modal::Pick { items, .. } => items.len() + 1,
             Modal::Keyboard(_) => 0,
         }
     }
@@ -146,6 +165,7 @@ impl Modal {
             | Modal::Settings { focus, .. }
             | Modal::Confirm { focus, .. }
             | Modal::Players { focus, .. }
+            | Modal::Pick { focus, .. }
             | Modal::FriendRequest { focus, .. } => Some(focus),
             Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) => None,
         }
@@ -198,6 +218,18 @@ impl Modal {
                 Action::RequestFriend(pk, name)
             }
             Modal::FriendRequest { pk, focus, .. } if nav == Nav::Ok => Action::AnswerRequest(pk.clone(), *focus == 1),
+            Modal::Pick { items, focus, max, purpose, .. } if nav == Nav::Ok => {
+                if *focus < items.len() {
+                    let count = items.iter().filter(|i| i.2).count();
+                    let it = &mut items[*focus];
+                    if it.2 || count < *max {
+                        it.2 = !it.2;
+                    }
+                    Action::None
+                } else {
+                    Action::Picked(purpose.clone(), items.iter().filter(|i| i.2).map(|i| i.0.clone()).collect())
+                }
+            }
             Modal::Confirm { yes, focus, .. } if nav == Nav::Ok => {
                 if *focus == 1 {
                     Action::Confirmed(*yes)
@@ -275,6 +307,43 @@ impl Modal {
                 rows(ui, r, s, &items, *focus, appear);
             }
             Modal::Keyboard(k) => k.paint(ui, screen, s, appear),
+            Modal::Pick { title, items, focus, scroll, max, .. } => {
+                let visible = 7.min(items.len());
+                let r = panel(ui, screen, s, 760.0, title, visible + 1, appear);
+                let target = (*focus as f32 - (visible as f32 - 2.0)).clamp(0.0, items.len().saturating_sub(visible) as f32);
+                *scroll += (target - *scroll) * (1.0 - (-dt * 18.0).exp());
+                let list = Rect::from_min_size(r.min, vec2(r.width(), visible as f32 * ROW * s));
+                let clip = ui.painter().with_clip_rect(list.expand(2.0));
+                for (i, (pk, name, on)) in items.iter().enumerate() {
+                    let y = list.top() + (i as f32 - *scroll) * ROW * s;
+                    if y + ROW * s < list.top() || y > list.bottom() {
+                        continue;
+                    }
+                    let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    let f = i == *focus;
+                    if f {
+                        clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
+                    }
+                    let fg = if f { Color32::from_rgb(10, 12, 18) } else { white(appear) };
+                    let cb = Rect::from_center_size(pos2(row.left() + 30.0 * s, row.center().y), vec2(26.0 * s, 26.0 * s));
+                    if *on {
+                        clip.rect_filled(cb, CornerRadius::same((6.0 * s) as u8), Color32::from_rgb(61, 123, 255));
+                        clip.text(cb.center(), Align2::CENTER_CENTER, "✓", bold(19.0 * s), Color32::WHITE);
+                    } else {
+                        clip.rect_stroke(cb, CornerRadius::same((6.0 * s) as u8), Stroke::new(2.0 * s, fg.gamma_multiply(0.6)), StrokeKind::Inside);
+                    }
+                    let av = pos2(cb.right() + 36.0 * s, row.center().y);
+                    clip.circle_filled(av, 18.0 * s, draw::name_color(pk));
+                    clip.text(av, Align2::CENTER_CENTER, name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(), semibold(16.0 * s), Color32::WHITE);
+                    clip.text(pos2(av.x + 32.0 * s, row.center().y), Align2::LEFT_CENTER, name, semibold(21.0 * s), fg);
+                }
+                let picked = items.iter().filter(|i| i.2).count();
+                let btn = Rect::from_min_size(pos2(r.left(), list.bottom() + 10.0 * s), vec2(r.width(), ROW * s - 6.0 * s));
+                let f = *focus == items.len();
+                let p = ui.painter();
+                p.rect_filled(btn, CornerRadius::same((30.0 * s) as u8), if f { white(appear) } else { Color32::from_rgb(61, 123, 255).gamma_multiply(appear) });
+                p.text(btn.center(), Align2::CENTER_CENTER, format!("Готово ({picked} из {max})"), semibold(22.0 * s), if f { Color32::from_rgb(10, 12, 18) } else { Color32::WHITE });
+            }
             Modal::FriendRequest { name, focus, .. } => {
                 let r = panel(ui, screen, s, 620.0, &format!("{name} хочет добавить вас в друзья"), 2, appear);
                 rows(ui, r, s, &["Отклонить", "Принять"], *focus, appear);

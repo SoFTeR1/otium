@@ -28,7 +28,9 @@ enum Zone {
 enum Item {
     Me,
     Find,
+    NewGroup,
     Request(String),
+    Group(String),
     Friend(String),
 }
 
@@ -56,6 +58,45 @@ pub struct Social {
 }
 
 impl Social {
+    pub fn me_pk(&self) -> Option<String> {
+        self.me.clone()
+    }
+
+    /// Sends a raw (already JSON) control message as an encrypted DM.
+    pub fn send_raw(&self, pk: &str, text: String) {
+        self.net.send(Cmd::SendDm { to: pk.into(), text });
+    }
+
+    pub fn chat_is(&self, key: &str) -> bool {
+        self.chat.as_deref() == Some(key)
+    }
+
+    pub fn close_chat_if(&mut self, key: &str) {
+        if self.chat_is(key) {
+            self.chat = None;
+            self.zone = Zone::List;
+        }
+    }
+
+    pub fn open_chat(&mut self, key: &str) {
+        self.open = true;
+        self.chat = Some(key.into());
+        self.zone = Zone::Chat;
+        self.chat_scroll = 0.0;
+    }
+
+    pub fn chat_focused(&self) -> bool {
+        self.zone == Zone::Chat
+    }
+
+    pub fn chat_scroll(&self) -> f32 {
+        self.chat_scroll
+    }
+
+    pub fn set_chat_scroll(&mut self, v: f32) {
+        self.chat_scroll = v;
+    }
+
     pub fn new(bus: crate::watch::Bus) -> Self {
         let net = nostr::Nostr::start(move |m| bus.send(crate::watch::Event::Nostr(m)));
         Self {
@@ -88,7 +129,7 @@ fn now_s() -> u64 {
 }
 
 impl App {
-    fn account(&self) -> Option<Account> {
+    pub(super) fn account(&self) -> Option<Account> {
         let mut c = self.social.cache.borrow_mut();
         if c.is_none() {
             *c = Some(Account::load(self.lib.extra.get("social")));
@@ -96,7 +137,7 @@ impl App {
         c.as_ref().and_then(|a| a.clone())
     }
 
-    fn store_account(&mut self, a: Option<&Account>) {
+    pub(super) fn store_account(&mut self, a: Option<&Account>) {
         *self.social.cache.borrow_mut() = Some(a.cloned());
         match a {
             Some(a) => {
@@ -110,7 +151,7 @@ impl App {
         self.social.save_at = Some(Instant::now() + Duration::from_millis(800));
     }
 
-    fn with_account(&mut self, f: impl FnOnce(&mut Account)) {
+    pub(super) fn with_account(&mut self, f: impl FnOnce(&mut Account)) {
         if let Some(mut a) = self.account() {
             f(&mut a);
             self.store_account(Some(&a));
@@ -130,7 +171,7 @@ impl App {
         self.social.presence_at = Some(Instant::now());
     }
 
-    fn watch_friends(&self, a: &Account) {
+    pub(super) fn watch_friends(&self, a: &Account) {
         let pks: Vec<String> = a.friends.iter().map(|f| f.pk.clone()).chain(a.requests.iter().map(|r| r.pk.clone())).collect();
         self.social.net.send(Cmd::Watch(pks));
     }
@@ -191,13 +232,13 @@ impl App {
         self.social.net.send(Cmd::Publish(30078, content, vec![vec!["d".into(), "ps5l-library".into()]]));
     }
 
-    fn send_ctrl(&self, pk: &str, t: &str) {
+    pub(super) fn send_ctrl(&self, pk: &str, t: &str) {
         let name = self.account().map(|a| a.name).unwrap_or_default();
         let text = json!({ "pl": CTRL, "t": t, "n": name }).to_string();
         self.social.net.send(Cmd::SendDm { to: pk.into(), text });
     }
 
-    fn presence_of(&self, pk: &str) -> (bool, String, bool) {
+    pub(super) fn presence_of(&self, pk: &str) -> (bool, String, bool) {
         match self.social.presence.get(pk) {
             Some((text, at)) if (now_ms() as f64 - at) < ONLINE_MS => {
                 let t = if text.is_empty() { "В сети".to_string() } else { text.clone() };
@@ -208,7 +249,7 @@ impl App {
         }
     }
 
-    fn display_name(&self, a: &Account, pk: &str) -> String {
+    pub(super) fn display_name(&self, a: &Account, pk: &str) -> String {
         a.name_of(pk)
             .map(str::to_string)
             .or_else(|| self.social.profiles.get(pk).map(|(n, _)| n.clone()))
@@ -217,7 +258,7 @@ impl App {
 
     pub fn social_unread(&self) -> usize {
         let (Some(a), Some(me)) = (self.account(), self.social.me.as_deref()) else { return 0 };
-        a.friends.iter().map(|f| a.unread(&f.pk, me)).sum::<usize>() + a.requests.len()
+        a.friends.iter().map(|f| a.unread(&f.pk, me)).sum::<usize>() + a.requests.len() + a.groups().iter().map(|g| a.group_unread(g, me)).sum::<usize>()
     }
 
     // ---------- network events ----------
@@ -308,7 +349,8 @@ impl App {
                     self.add_friend(&other, &name, false);
                 }
                 ("rm", false) if a.is_friend(&other) => self.remove_friend(&other, false),
-                // calls and groups come in a later version
+                (t, false) if super::calls::CALL_CTRL.contains(&t) => self.on_call_ctrl(&other, &c, at),
+                (t, false) if super::calls::GROUP_CTRL.contains(&t) => self.on_group_ctrl(&other, &c, at),
                 _ => {}
             }
             return;
@@ -375,7 +417,7 @@ impl App {
         }
     }
 
-    fn mark_read(&mut self, pk: &str) {
+    pub(super) fn mark_read(&mut self, pk: &str) {
         let pk = pk.to_string();
         self.with_account(|a| {
             a.last_read.insert(pk, now_ms());
@@ -392,9 +434,16 @@ impl App {
     }
 
     fn items(&self, a: &Account) -> Vec<Item> {
-        let mut items = vec![Item::Me, Item::Find];
+        let mut items = vec![Item::Me, Item::Find, Item::NewGroup];
         items.extend(a.requests.iter().map(|r| Item::Request(r.pk.clone())));
         let me = self.social.me.clone().unwrap_or_default();
+        // groups with people in voice or unread messages first
+        let mut gs = a.groups();
+        let last_at = |g: &crate::account::Group| g.history.last().map_or(g.created, |m| m.at.max(g.created));
+        gs.sort_by(|x, y| {
+            self.in_room(&y.id).len().cmp(&self.in_room(&x.id).len()).then(a.group_unread(y, &me).cmp(&a.group_unread(x, &me))).then(last_at(y).cmp(&last_at(x)))
+        });
+        items.extend(gs.into_iter().map(|g| Item::Group(g.id)));
         let mut fr: Vec<&Friend> = a.friends.iter().collect();
         fr.sort_by(|x, y| {
             let (px, py) = (self.presence_of(&x.pk).0, self.presence_of(&y.pk).0);
@@ -430,11 +479,11 @@ impl App {
                 Nav::Down if self.social.idx + 1 < items.len() => self.social.idx += 1,
                 Nav::Right if self.social.chat.is_some() => self.social.zone = Zone::Chat,
                 Nav::Ok => self.activate(&a, items[self.social.idx].clone()),
-                Nav::Options => {
-                    if let Item::Friend(pk) = &items[self.social.idx] {
-                        self.open_friend_menu(&a, pk);
-                    }
-                }
+                Nav::Options => match &items[self.social.idx] {
+                    Item::Friend(pk) => self.open_friend_menu(&a, pk),
+                    Item::Group(gid) => self.open_group_menu(gid),
+                    _ => {}
+                },
                 _ => {}
             },
             Zone::Chat => match nav {
@@ -442,12 +491,23 @@ impl App {
                 Nav::Up => self.social.chat_scroll += 3.0,
                 Nav::Down => self.social.chat_scroll = (self.social.chat_scroll - 3.0).max(0.0),
                 Nav::Ok => {
-                    let to = self.social.chat.clone().map(|pk| self.display_name(&a, &pk)).unwrap_or_default();
-                    self.open(Modal::Keyboard(Box::new(crate::keyboard::Keyboard::new(&format!("Сообщение для {to}"), "", Target::Chat, 1000, false))));
+                    let chat = self.social.chat.clone().unwrap_or_default();
+                    let title = match chat.strip_prefix("g:") {
+                        Some(gid) => format!("Сообщение в «{}»", self.group(gid).map(|g| g.title(&self.social.me.clone().unwrap_or_default())).unwrap_or_default()),
+                        None => format!("Сообщение для {}", self.display_name(&a, &chat)),
+                    };
+                    self.open(Modal::Keyboard(Box::new(crate::keyboard::Keyboard::new(&title, "", Target::Chat, 1000, false))));
                 }
                 Nav::Options => {
-                    if let Some(pk) = self.social.chat.clone() {
-                        self.open_friend_menu(&a, &pk);
+                    if let Some(chat) = self.social.chat.clone() {
+                        match chat.strip_prefix("g:") {
+                            // a group chat: Y joins the voice room, or opens its menu once in it
+                            Some(gid) if self.calls.room.as_ref().is_some_and(|r| r.gid == gid) => self.open_group_menu(gid),
+                            Some(gid) => self.join_room(gid),
+                            // a friend: Y opens the call menu during a call with them, else calls
+                            None if self.calls.in_call() && self.calls.call.pk == chat => self.open_call_menu(0),
+                            None => self.open_friend_menu(&a, &chat),
+                        }
                     }
                 }
                 _ => {}
@@ -459,6 +519,12 @@ impl App {
         match it {
             Item::Me => self.open_profile(a),
             Item::Find => self.open(Modal::Keyboard(Box::new(crate::keyboard::Keyboard::new("Ник или код друга", "", Target::FindFriends, 64, false)))),
+            Item::NewGroup => self.open_picker("Новая группа", super::calls::PickFor::NewGroup, &[], super::calls::MAX_GROUP - 1),
+            Item::Group(gid) => {
+                let key = format!("g:{gid}");
+                self.social.open_chat(&key);
+                self.mark_read(&key);
+            }
             Item::Request(pk) => {
                 let name = self.display_name(a, &pk);
                 self.open(Modal::FriendRequest { pk, name, focus: 1 });
@@ -487,6 +553,7 @@ impl App {
         self.social.menu_pk = Some(pk.to_string());
         let items = vec![
             SetItem { key: SetKey::FriendChat, label: "Написать".into(), value: String::new(), danger: false },
+            SetItem { key: SetKey::FriendCall, label: "Позвонить".into(), value: "голосовой звонок".into(), danger: false },
             SetItem { key: SetKey::FriendRemove, label: "Удалить из друзей".into(), value: String::new(), danger: true },
         ];
         self.open(Modal::Settings { menu: SetMenu::Friend, title: self.display_name(a, pk), items, focus: 0, scroll: 0.0 });
@@ -523,6 +590,12 @@ impl App {
                     self.activate(&a, Item::Friend(pk));
                 }
             }
+            SetKey::FriendCall => {
+                self.modal = None;
+                if let Some(pk) = self.social.menu_pk.take() {
+                    self.start_call(&pk);
+                }
+            }
             SetKey::FriendRemove => {
                 self.modal = None;
                 if let Some(pk) = self.social.menu_pk.take() {
@@ -551,6 +624,12 @@ impl App {
             Target::Chat => {
                 let Some(pk) = self.social.chat.clone() else { return };
                 if text.is_empty() {
+                    return;
+                }
+                if let Some(gid) = pk.strip_prefix("g:") {
+                    let gid = gid.to_string();
+                    self.send_group_message(&gid, &text);
+                    self.social.chat_scroll = 0.0;
                     return;
                 }
                 self.social.net.send(Cmd::SendDm { to: pk.clone(), text });
@@ -688,7 +767,8 @@ impl App {
         let mut y = left.top();
         let list_focus = self.social.zone == Zone::List && self.modal.is_none();
         let online = a.friends.iter().filter(|f| self.presence_of(&f.pk).0).count();
-        let mut header_done = (false, false);
+        let mut header_done = (false, false, false);
+        let groups = a.groups();
         // scroll the list so the focused row stays visible
         let focus_y = self.social.idx as f32 * row_h + 80.0 * s;
         let offset = (focus_y - (left.height() - row_h * 2.0)).max(0.0);
@@ -698,6 +778,11 @@ impl App {
             if matches!(it, Item::Request(_)) && !header_done.0 {
                 header_done.0 = true;
                 clip.text(pos2(left.left() + 8.0 * s, y + 18.0 * s), Align2::LEFT_CENTER, "Заявки", semibold(17.0 * s), white(0.5));
+                y += 36.0 * s;
+            }
+            if matches!(it, Item::Group(_)) && !header_done.2 {
+                header_done.2 = true;
+                clip.text(pos2(left.left() + 8.0 * s, y + 18.0 * s), Align2::LEFT_CENTER, "Группы", semibold(17.0 * s), white(0.5));
                 y += 36.0 * s;
             }
             if matches!(it, Item::Friend(_)) && !header_done.1 {
@@ -711,7 +796,11 @@ impl App {
                 continue;
             }
             let f = list_focus && i == self.social.idx;
-            let active = matches!(it, Item::Friend(pk) if self.social.chat.as_deref() == Some(pk.as_str()));
+            let active = match it {
+                Item::Friend(pk) => self.social.chat.as_deref() == Some(pk.as_str()),
+                Item::Group(gid) => self.social.chat_is(&format!("g:{gid}")),
+                _ => false,
+            };
             if f {
                 clip.rect_filled(r, CornerRadius::same((14.0 * s) as u8), Color32::WHITE);
             } else if active {
@@ -731,6 +820,32 @@ impl App {
                     clip.text(av, Align2::CENTER_CENTER, "+", bold(28.0 * s), fg);
                     clip.text(pos2(tx, r.center().y - 11.0 * s), Align2::LEFT_CENTER, "Найти друзей", semibold(21.0 * s), fg);
                     clip.text(pos2(tx, r.center().y + 13.0 * s), Align2::LEFT_CENTER, "по нику или коду", font(16.0 * s), fg.gamma_multiply(0.6));
+                }
+                Item::NewGroup => {
+                    clip.circle_filled(av, 24.0 * s, if f { Color32::from_rgb(230, 234, 245) } else { white(0.1) });
+                    clip.text(av, Align2::CENTER_CENTER, "👥", font(22.0 * s), fg);
+                    clip.text(pos2(tx, r.center().y - 11.0 * s), Align2::LEFT_CENTER, "Создать группу", semibold(21.0 * s), fg);
+                    clip.text(pos2(tx, r.center().y + 13.0 * s), Align2::LEFT_CENTER, "чат и голосовой для 3–5 друзей", font(16.0 * s), fg.gamma_multiply(0.6));
+                }
+                Item::Group(gid) => {
+                    let Some(g) = groups.iter().find(|g| &g.id == gid) else { continue };
+                    let title = g.title(&me);
+                    clip.circle_filled(av, 24.0 * s, draw::name_color(&g.id));
+                    clip.text(av, Align2::CENTER_CENTER, title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(), semibold(21.0 * s), Color32::WHITE);
+                    clip.text(pos2(tx, r.center().y - 11.0 * s), Align2::LEFT_CENTER, &title, semibold(21.0 * s), fg);
+                    let live = self.in_room(gid).len();
+                    let (sub, col) = if live > 0 {
+                        (format!("🔊 в голосовом: {live}"), GREEN)
+                    } else {
+                        (format!("{} {}", g.members.len(), crate::app::plural(g.members.len(), "участник", "участника", "участников")), fg.gamma_multiply(0.6))
+                    };
+                    clip.text(pos2(tx, r.center().y + 13.0 * s), Align2::LEFT_CENTER, sub, font(16.0 * s), col);
+                    let u = a.group_unread(g, &me);
+                    if u > 0 {
+                        let b = pos2(r.right() - 26.0 * s, r.center().y);
+                        clip.circle_filled(b, 13.0 * s, Color32::from_rgb(237, 66, 69));
+                        clip.text(b, Align2::CENTER_CENTER, u.min(99).to_string(), semibold(14.0 * s), Color32::WHITE);
+                    }
                 }
                 Item::Request(pk) => {
                     let name = self.display_name(&a, pk);
@@ -770,8 +885,16 @@ impl App {
             p.text(right.center(), Align2::CENTER_CENTER, "Выберите друга, чтобы начать чат", font(22.0 * s), white(0.45));
             return;
         };
+        if let Some(gid) = pk.strip_prefix("g:") {
+            let gid = gid.to_string();
+            return self.paint_group_chat(ui, right, s, &gid);
+        }
         let name = self.display_name(&a, &pk);
-        let (on, status, game) = self.presence_of(&pk);
+        let (mut on, mut status, game) = self.presence_of(&pk);
+        if self.calls.call.pk == pk && self.calls.call.state == super::calls::CallState::Active {
+            on = true;
+            status = format!("● В звонке · Y — меню звонка");
+        }
         let head = Rect::from_min_size(right.min, vec2(right.width(), 84.0 * s));
         avatar(p, pos2(head.left() + 48.0 * s, head.center().y), 26.0 * s, &pk, &name);
         p.text(pos2(head.left() + 90.0 * s, head.center().y - 12.0 * s), Align2::LEFT_CENTER, &name, semibold(23.0 * s), Color32::WHITE);
@@ -786,7 +909,7 @@ impl App {
             draw::glow(p, input, 16.0 * s, Color32::WHITE, 12.0 * s, 0.4);
         }
         p.rect_filled(input, CornerRadius::same((16.0 * s) as u8), if chat_focus { white(0.14) } else { white(0.06) });
-        p.text(pos2(input.left() + 22.0 * s, input.center().y), Align2::LEFT_CENTER, format!("Сообщение для {name}"), font(19.0 * s), white(0.45));
+        p.text(pos2(input.left() + 22.0 * s, input.center().y), Align2::LEFT_CENTER, format!("Сообщение для {name} · Y — позвонить"), font(19.0 * s), white(0.45));
 
         // messages, newest at the bottom, grouped like Discord
         let msgs = a.history.get(&pk).cloned().unwrap_or_default();
@@ -795,46 +918,12 @@ impl App {
             p.text(area.center(), Align2::CENTER_CENTER, format!("Это начало переписки с {name}. Скажите привет 👋"), font(20.0 * s), white(0.5));
             return;
         }
-        let clip = p.with_clip_rect(area);
-        let line_h = 28.0 * s;
-        // lay out from the bottom up
-        let mut blocks: Vec<(String, i64, Vec<String>)> = Vec::new();
-        for m in &msgs {
-            let new_group = blocks.last().is_none_or(|b: &(String, i64, Vec<String>)| b.0 != m.from || m.at - b.1 > 5 * 60_000);
-            if new_group {
-                blocks.push((m.from.clone(), m.at, vec![m.text.clone()]));
-            } else if let Some(b) = blocks.last_mut() {
-                b.1 = m.at;
-                b.2.push(m.text.clone());
-            }
-        }
-        let max_scroll = 10_000.0;
-        self.social.chat_scroll = self.social.chat_scroll.min(max_scroll);
-        let mut y = area.bottom() + self.social.chat_scroll * line_h;
-        let wrap = area.width() - 70.0 * s;
-        for (from, at, lines) in blocks.iter().rev() {
-            let galleys: Vec<_> = lines.iter().map(|t| p.layout(t.clone(), font(19.0 * s), white(0.92), wrap)).collect();
-            let h: f32 = galleys.iter().map(|g| g.size().y + 4.0 * s).sum::<f32>() + 30.0 * s;
-            y -= h + 14.0 * s;
-            if y > area.bottom() || y + h < area.top() {
-                continue;
-            }
-            let mine = *from == me;
-            let who = if mine { a.name.clone() } else { name.clone() };
-            avatar(&clip, pos2(area.left() + 22.0 * s, y + 22.0 * s), 20.0 * s, from, &who);
-            let time = chrono::TimeZone::timestamp_millis_opt(&chrono::Local, *at).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default();
-            let date = crate::app::fmt_date(*at as f64);
-            let when = if date.starts_with("сегодня") { time } else { date };
-            let tx = area.left() + 56.0 * s;
-            let nr = clip.text(pos2(tx, y + 4.0 * s), Align2::LEFT_TOP, &who, semibold(18.0 * s), if mine { Color32::from_rgb(150, 180, 255) } else { Color32::WHITE });
-            clip.text(pos2(nr.right() + 10.0 * s, y + 7.0 * s), Align2::LEFT_TOP, when, font(14.0 * s), white(0.4));
-            let mut ly = y + 30.0 * s;
-            for g in galleys {
-                let gh = g.size().y;
-                clip.galley(pos2(tx, ly), g, Color32::WHITE);
-                ly += gh + 4.0 * s;
-            }
-        }
+        let my_name = a.name.clone();
+        let other = name.clone();
+        let me2 = me.clone();
+        let mut scroll = self.social.chat_scroll;
+        paint_messages(p, area, s, &msgs, &me, &mut scroll, &move |pk: &str| if pk == me2 { my_name.clone() } else { other.clone() });
+        self.social.chat_scroll = scroll;
     }
 
     fn paint_welcome(&self, ui: &egui::Ui, rect: Rect, s: f32) {
@@ -865,4 +954,47 @@ fn avatar(p: &egui::Painter, c: egui::Pos2, r: f32, key: &str, name: &str) {
     p.circle_filled(c, r, draw::name_color(if key.is_empty() { name } else { key }));
     let letter = name.chars().next().map(|ch| ch.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
     p.text(c, Align2::CENTER_CENTER, letter, semibold(r * 0.9), Color32::WHITE);
+}
+
+/// Messages, newest at the bottom, grouped like Discord: one header per run of messages from the
+/// same person within 5 minutes. `scroll` is in lines up from the bottom.
+pub(super) fn paint_messages(p: &egui::Painter, area: Rect, s: f32, msgs: &[Message], me: &str, scroll: &mut f32, name_of: &dyn Fn(&str) -> String) {
+    let clip = p.with_clip_rect(area);
+    let line_h = 28.0 * s;
+    let mut blocks: Vec<(String, i64, Vec<String>)> = Vec::new();
+    for m in msgs {
+        let new_group = blocks.last().is_none_or(|b: &(String, i64, Vec<String>)| b.0 != m.from || m.at - b.1 > 5 * 60_000);
+        if new_group {
+            blocks.push((m.from.clone(), m.at, vec![m.text.clone()]));
+        } else if let Some(b) = blocks.last_mut() {
+            b.1 = m.at;
+            b.2.push(m.text.clone());
+        }
+    }
+    *scroll = scroll.min(10_000.0);
+    let mut y = area.bottom() + *scroll * line_h;
+    let wrap = area.width() - 70.0 * s;
+    for (from, at, lines) in blocks.iter().rev() {
+        let galleys: Vec<_> = lines.iter().map(|t| p.layout(t.clone(), font(19.0 * s), white(0.92), wrap)).collect();
+        let h: f32 = galleys.iter().map(|g| g.size().y + 4.0 * s).sum::<f32>() + 30.0 * s;
+        y -= h + 14.0 * s;
+        if y > area.bottom() || y + h < area.top() {
+            continue;
+        }
+        let mine = from == me;
+        let who = name_of(from);
+        avatar(&clip, pos2(area.left() + 22.0 * s, y + 22.0 * s), 20.0 * s, from, &who);
+        let time = chrono::TimeZone::timestamp_millis_opt(&chrono::Local, *at).single().map(|d| d.format("%H:%M").to_string()).unwrap_or_default();
+        let date = crate::app::fmt_date(*at as f64);
+        let when = if date.starts_with("сегодня") { time } else { date };
+        let tx = area.left() + 56.0 * s;
+        let nr = clip.text(pos2(tx, y + 4.0 * s), Align2::LEFT_TOP, &who, semibold(18.0 * s), if mine { Color32::from_rgb(150, 180, 255) } else { Color32::WHITE });
+        clip.text(pos2(nr.right() + 10.0 * s, y + 7.0 * s), Align2::LEFT_TOP, when, font(14.0 * s), white(0.4));
+        let mut ly = y + 30.0 * s;
+        for g in galleys {
+            let gh = g.size().y;
+            clip.galley(pos2(tx, ly), g, Color32::WHITE);
+            ly += gh + 4.0 * s;
+        }
+    }
 }

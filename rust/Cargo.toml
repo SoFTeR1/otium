@@ -45,6 +45,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 nostr-sdk = "0.45"
 nostr = { version = "0.45", features = ["nip04"] }
 futures = { version = "0.3", default-features = false, features = ["std"] }
+webrtc = "0.21"
+opus = "0.4"
+nnnoiseless = "0.5"
+rtc = "0.21.1"
+async-trait = "0.1"
+bytes = "1"
 
 [profile.release]
 opt-level = 3

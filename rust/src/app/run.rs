@@ -298,6 +298,7 @@ impl App {
             Event::GuideToggle => self.guide_pressed(),
             Event::Toast { text, error } => self.toast(&text, error),
             Event::Nostr(m) => self.on_nostr(m),
+            Event::Voice(v) => self.on_voice(v),
             e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }
@@ -356,6 +357,12 @@ impl App {
 
     pub(super) fn open_control(&mut self) {
         let mut items = Vec::new();
+        if self.calls.call.state == crate::app::calls::CallState::Incoming {
+            items.push((CtlAction::AcceptCall, "Принять звонок"));
+        }
+        if self.calls.call.state == crate::app::calls::CallState::Active || self.calls.room.is_some() {
+            items.push((CtlAction::CallMenu, "Звонок: микрофон, звук, завершить"));
+        }
         if self.has_game() {
             items.push((CtlAction::ReturnToGame, "Вернуться в игру"));
             items.push((CtlAction::CloseGame, "Закрыть игру"));
@@ -373,6 +380,8 @@ impl App {
             CtlAction::CloseGame => self.close_game(None),
             CtlAction::Home => self.social.open = false,
             CtlAction::Social => self.open_social(),
+            CtlAction::CallMenu => self.open_call_menu(0),
+            CtlAction::AcceptCall => self.accept_call(),
             CtlAction::Settings => self.open_settings(crate::modal::SetMenu::Main, 0),
             CtlAction::Power => self.open_settings(crate::modal::SetMenu::Power, 0),
         }

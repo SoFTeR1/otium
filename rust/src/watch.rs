@@ -28,6 +28,7 @@ pub enum Event {
     /// show the window (tray click); egui has to be told, or it keeps it hidden
     Show,
     Nostr(crate::nostr::Msg),
+    Voice(crate::voice::Event),
     /// what's playing changed (None = nothing)
     Music(Option<crate::media::Music>),
 }

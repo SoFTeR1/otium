@@ -15,6 +15,16 @@ pub enum Sfx {
     Launch,
     Err,
     Splash,
+    /// incoming call: a friendly marimba phrase
+    Ring,
+    /// outgoing ringback: two calm notes
+    Ringback,
+    /// call connected: rising sparkle
+    Connect,
+    /// call ended: gentle fall
+    End,
+    MicOn,
+    MicOff,
 }
 
 static TX: OnceLock<Sender<Sfx>> = OnceLock::new();
@@ -94,10 +104,76 @@ fn render(s: Sfx) -> Vec<f32> {
         }
         Sfx::Err => tone(&mut b, 200.0, 0.18, 0.05, Wave::Square, 0.0),
         Sfx::Splash => return splash(),
+        Sfx::Ring | Sfx::Ringback | Sfx::Connect | Sfx::End | Sfx::MicOn | Sfx::MicOff => return call_sound(s),
     }
     // the Electron build ran these through the browser's output at about this level
     for v in &mut b {
         *v *= 2.5;
+    }
+    stereo(b)
+}
+
+/// MIDI note -> Hz
+fn note(n: f32) -> f32 {
+    440.0 * 2f32.powf((n - 69.0) / 12.0)
+}
+
+/// A bell: sine partials with a soft attack and an exponential ring, mixed into `buf`.
+fn bell(buf: &mut Vec<f32>, midi: f32, at: f32, dur: f32, vol: f32, attack: f32, partials: &[(f32, f32)]) {
+    let f = note(midi);
+    let start = (at * RATE as f32) as usize;
+    let len = ((dur + 0.05) * RATE as f32) as usize;
+    if buf.len() < start + len {
+        buf.resize(start + len, 0.0);
+    }
+    for &(mult, amp) in partials {
+        let d = dur / mult.sqrt();
+        for i in 0..len {
+            let t = i as f32 / RATE as f32;
+            let env = if t < attack { vol * amp * t / attack } else { vol * amp * (0.0001f32 / (vol * amp)).powf(((t - attack) / d).min(1.0)) };
+            buf[start + i] += (std::f32::consts::TAU * f * mult * t).sin() * env;
+        }
+    }
+}
+
+/// Call sounds, after the Electron build's little bell synth (with its short echo).
+fn call_sound(s: Sfx) -> Vec<f32> {
+    let mut b = Vec::new();
+    let marimba: &[(f32, f32)] = &[(1.0, 1.0), (3.99, 0.22), (9.9, 0.04)];
+    let plain: &[(f32, f32)] = &[(1.0, 1.0), (2.01, 0.28), (3.98, 0.08), (5.4, 0.03)];
+    let soft: &[(f32, f32)] = &[(1.0, 1.0), (2.0, 0.12)];
+    match s {
+        Sfx::Ring => {
+            for (n, at) in [(79.0, 0.0), (83.0, 0.14), (86.0, 0.28), (83.0, 0.56), (86.0, 0.7)] {
+                bell(&mut b, n, at, 0.9, 0.13, 0.008, marimba);
+            }
+        }
+        Sfx::Ringback => {
+            bell(&mut b, 69.0, 0.0, 1.6, 0.07, 0.09, soft);
+            bell(&mut b, 76.0, 0.42, 1.6, 0.07, 0.09, soft);
+        }
+        Sfx::Connect => {
+            for (n, at) in [(76.0, 0.0), (80.0, 0.07), (83.0, 0.14), (88.0, 0.21)] {
+                bell(&mut b, n, at, 1.1, 0.1, 0.008, plain);
+            }
+        }
+        Sfx::End => {
+            bell(&mut b, 76.0, 0.0, 0.9, 0.09, 0.008, plain);
+            bell(&mut b, 69.0, 0.16, 1.2, 0.09, 0.008, plain);
+        }
+        Sfx::MicOn | Sfx::MicOff => bell(&mut b, if s == Sfx::MicOn { 84.0 } else { 77.0 }, 0.0, 0.25, 0.06, 0.008, &[(1.0, 1.0)]),
+        _ => {}
+    }
+    // short feedback echo for some air
+    let d = (0.18 * RATE as f32) as usize;
+    let n = b.len();
+    b.resize(n + d * 4, 0.0);
+    let mut wet = vec![0f32; b.len()];
+    for i in d..b.len() {
+        wet[i] = b[i - d] * 0.35 + wet[i - d] * 0.22;
+    }
+    for (x, w) in b.iter_mut().zip(wet) {
+        *x = (*x + w).clamp(-1.0, 1.0);
     }
     stereo(b)
 }

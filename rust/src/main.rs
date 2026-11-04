@@ -17,6 +17,7 @@ mod media;
 mod steam_api;
 mod thumbs;
 mod tray;
+mod voice;
 mod watch;
 mod win;
 

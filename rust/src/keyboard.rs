@@ -16,12 +16,17 @@ pub enum Target {
     LoginKey,
     FindFriends,
     Rename,
+    GroupName,
+    GroupRename,
 }
 
 impl Target {
     /// Text for the friends panel, not for the settings screens.
     pub fn is_social(self) -> bool {
-        matches!(self, Target::Chat | Target::AccountName | Target::LoginKey | Target::FindFriends | Target::Rename)
+        matches!(
+            self,
+            Target::Chat | Target::AccountName | Target::LoginKey | Target::FindFriends | Target::Rename | Target::GroupName | Target::GroupRename
+        )
     }
 }
 

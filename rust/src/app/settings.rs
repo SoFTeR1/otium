@@ -120,7 +120,7 @@ impl App {
                 )
             }
             // the friends panel builds these itself
-            SetMenu::Profile | SetMenu::Friend => return,
+            SetMenu::Profile | SetMenu::Friend | SetMenu::Call | SetMenu::Group => return,
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -150,6 +150,12 @@ impl App {
     pub(super) fn apply_setting(&mut self, menu: SetMenu, key: SetKey, focus: usize) {
         if matches!(menu, SetMenu::Profile | SetMenu::Friend) {
             return self.social_setting(key);
+        }
+        if menu == SetMenu::Call {
+            return self.call_setting(key, focus);
+        }
+        if menu == SetMenu::Group {
+            return self.group_setting(key);
         }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
@@ -216,7 +222,18 @@ impl App {
             | SetKey::ProfileKey
             | SetKey::ProfileLogout
             | SetKey::FriendChat
-            | SetKey::FriendRemove => {}
+            | SetKey::FriendRemove
+            | SetKey::FriendCall
+            | SetKey::CallMute
+            | SetKey::CallDeafen
+            | SetKey::CallVolume
+            | SetKey::CallNoise
+            | SetKey::CallAdd
+            | SetKey::CallHangup
+            | SetKey::GroupVoice
+            | SetKey::GroupInvite
+            | SetKey::GroupRename
+            | SetKey::GroupLeave => {}
             SetKey::ApiKey => {
                 let k = self.lib.setting_str("steamApiKey").to_string();
                 self.keyboard("Steam Web API-ключ", &k, Target::ApiKey, 64, true);
@@ -291,6 +308,9 @@ impl App {
         if key == SetKey::ProfileLogout {
             return self.social_logout();
         }
+        if key == SetKey::GroupLeave {
+            return self.group_confirmed();
+        }
         use std::os::windows::process::CommandExt;
         let arg = match key {
             SetKey::Restart => "/r",
@@ -309,6 +329,10 @@ impl App {
             }
             return self.reopen_after_text(None);
         };
+        if matches!(target, Target::GroupName | Target::GroupRename) {
+            self.modal = None;
+            return self.group_text(target, text);
+        }
         if target.is_social() {
             return self.social_text(target, text);
         }

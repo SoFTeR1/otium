@@ -32,6 +32,50 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Member {
+    pub pk: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// A group chat with its voice room, as the Electron build stores it under `social.groups`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Group {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub created: i64,
+    #[serde(default)]
+    pub members: Vec<Member>,
+    #[serde(default)]
+    pub history: Vec<Message>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl Group {
+    pub fn is_member(&self, pk: &str) -> bool {
+        self.members.iter().any(|m| m.pk == pk)
+    }
+
+    pub fn member_name(&self, pk: &str) -> Option<&str> {
+        self.members.iter().find(|m| m.pk == pk).map(|m| m.name.as_str()).filter(|n| !n.is_empty())
+    }
+
+    /// The group's name, or its other members when it has none.
+    pub fn title(&self, me: &str) -> String {
+        if !self.name.trim().is_empty() {
+            return self.name.clone();
+        }
+        let names: Vec<&str> = self.members.iter().filter(|m| m.pk != me).map(|m| m.name.as_str()).collect();
+        if names.is_empty() { "Группа".into() } else { names.join(", ") }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub sk: String,
@@ -73,6 +117,19 @@ impl Account {
     pub fn unread(&self, pk: &str, me: &str) -> usize {
         let last = self.last_read.get(pk).copied().unwrap_or(0);
         self.history.get(pk).map_or(0, |h| h.iter().filter(|m| m.from != me && m.at > last).count())
+    }
+
+    pub fn groups(&self) -> Vec<Group> {
+        self.extra.get("groups").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
+    }
+
+    pub fn set_groups(&mut self, groups: &[Group]) {
+        self.extra.insert("groups".into(), serde_json::to_value(groups).unwrap_or_default());
+    }
+
+    pub fn group_unread(&self, g: &Group, me: &str) -> usize {
+        let last = self.last_read.get(&format!("g:{}", g.id)).copied().unwrap_or(0);
+        g.history.iter().filter(|m| m.from != me && m.at > last).count()
     }
 
     /// Adds a message to a chat; false if it was already there.

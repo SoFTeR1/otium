@@ -14,8 +14,10 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+mod calls;
 mod pages;
 mod run;
+pub use calls::PickFor;
 mod settings;
 mod social;
 pub use pages::fmt_date;
@@ -104,6 +106,7 @@ pub struct App {
     /// the Discord status should be rebuilt (a game started or stopped)
     discord_soon: bool,
     social: social::Social,
+    calls: calls::Calls,
 }
 
 impl App {
@@ -132,6 +135,7 @@ impl App {
         let steam_now = crate::watch::steam_running_now();
         let tray = crate::tray::Tray::new(own.clone(), bus.clone());
         let social_bus = bus.clone();
+        let calls_bus = bus.clone();
         {
             let bus = bus.clone();
             crate::media::start(cc.egui_ctx.clone(), media_rx, idle.clone(), move |m| bus.send(crate::watch::Event::Music(m)));
@@ -180,6 +184,7 @@ impl App {
             last_text_target: None,
             discord_soon: false,
             social: social::Social::new(social_bus),
+            calls: calls::Calls::new(calls_bus),
             lib,
         };
         app.social_start();
@@ -278,9 +283,16 @@ impl App {
         if nav == Nav::Ok && self.modal.is_some() && self.modal_at.elapsed() < Duration::from_millis(300) {
             return;
         }
+        if self.call_menu_side(nav) {
+            return;
+        }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
             self.apply(action, frame);
+            return;
+        }
+        // the call card answers A / B / Y before anything else
+        if self.modal.is_none() && self.calls.card_open() && self.call_nav(nav) {
             return;
         }
         if self.social.open {
@@ -347,6 +359,7 @@ impl App {
             Action::Text(o) => self.text_done(o),
             Action::Confirmed(k) => self.confirmed(k),
             Action::RequestFriend(pk, name) => self.request_friend(pk, name),
+            Action::Picked(purpose, pks) => self.picked(purpose, pks),
             Action::AnswerRequest(pk, yes) => self.answer_request(pk, yes),
             Action::Control(c) => {
                 self.modal = None;
@@ -553,7 +566,7 @@ fn name_from_path(path: &std::path::Path) -> String {
     }
 }
 
-fn plural(n: usize, one: &'static str, few: &'static str, many: &'static str) -> &'static str {
+pub(crate) fn plural(n: usize, one: &'static str, few: &'static str, many: &'static str) -> &'static str {
     match (n % 10, n % 100) {
         (1, x) if x != 11 => one,
         (2..=4, x) if !(12..=14).contains(&x) => few,
@@ -580,6 +593,7 @@ impl eframe::App for App {
         self.tick(ctx);
         self.tick_pages();
         self.social_tick();
+        self.calls_tick();
         self.idle.store(self.away_for_game, Ordering::Relaxed);
         self.poll_tray();
         self.on_close_requested(ctx);
@@ -720,12 +734,17 @@ impl App {
 
         let hints: Vec<(usize, &str)> = match (&self.modal, self.pages.page) {
             (Some(m), _) => m.hints(),
+            (None, _) if self.calls.card_open() => vec![],
             (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
             (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
             (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
         if self.social.open {
             self.paint_social(ui, rect, s);
+        }
+        self.paint_call_pill(ui, rect, s);
+        if self.calls.card_open() {
+            self.paint_call_card(ui, rect, s);
         }
         self.paint_hints(ui, rect, s, &hints);
 
