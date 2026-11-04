@@ -69,6 +69,7 @@ impl App {
                 if started.tracked {
                     self.running.insert(game.id.clone());
                 }
+                self.discord_soon = true;
                 (Phase::Starting { ready_at: None }, started.tracked)
             }
         };
@@ -108,6 +109,9 @@ impl App {
             self.reload_steam_at = None;
             self.steam_stats = crate::steam::local_stats().1;
         }
+        if std::mem::take(&mut self.discord_soon) {
+            self.update_discord();
+        }
         let Some(l) = self.launching.as_mut() else { return };
         let now = Instant::now();
         let age = now - l.phase_at;
@@ -134,6 +138,7 @@ impl App {
             }
             Phase::Ready if age > Duration::from_millis(900) => next = Some("aside"),
             Phase::Failed(_) if age > Duration::from_millis(2600) => next = Some("leave"),
+            Phase::Failed(_) if age < Duration::from_millis(20) && self.lib.setting_bool("sounds", true) => crate::sound::play(crate::sound::Sfx::Err),
             Phase::Leaving if age.as_secs_f32() > 2.5 + FADE => next = Some("done"),
             _ => {}
         }
@@ -218,7 +223,7 @@ impl App {
             }
         }
         if matches!(l.phase, Phase::Starting { .. }) && l.at.elapsed().as_secs_f32() > 1.5 {
-            let b = if self.input.pad_kind == PadKind::PlayStation { "○" } else { "B" };
+            let b = if self.pad_kind() == PadKind::PlayStation { "○" } else { "B" };
             p.text(
                 pos2(rect.center().x, rect.bottom() - 70.0 * s),
                 Align2::CENTER_CENTER,
@@ -252,6 +257,7 @@ impl App {
                     self.reload_steam_at = Some(Instant::now() + Duration::from_secs(6));
                     self.trophies_changed(prev);
                 }
+                self.discord_soon = true;
                 if id != 0 {
                     self.steam_since.insert(id, at);
                     for gid in self.games_with_steam_id(id) {
@@ -262,6 +268,7 @@ impl App {
                 }
             }
             Event::Exited { id, start, end } => {
+                self.discord_soon = true;
                 self.running.remove(&id);
                 self.add_session(&id, start, end);
                 self.save();
@@ -272,8 +279,12 @@ impl App {
                 }
             }
             Event::GameWindow { hwnd } => self.game_hwnd = hwnd,
+            Event::Show => self.show_window(),
             Event::GuideFront { prev } => {
-                if prev != 0 && prev != self.own() {
+                self.show_window();
+                // the window OTIUM was summoned over is "the game" only if it looks like one:
+                // never a shell, launcher or chat window, and fullscreen unless we know a game runs
+                if prev != 0 && prev != self.own() && win::looks_like_game(prev, !self.running.is_empty()) {
                     self.game_hwnd = prev;
                 }
                 self.refocus = true;
@@ -346,6 +357,8 @@ impl App {
             items.push((CtlAction::CloseGame, "Закрыть игру"));
         }
         items.push((CtlAction::Home, "Главный экран"));
+        items.push((CtlAction::Settings, "Настройки"));
+        items.push((CtlAction::Power, "Питание"));
         self.open(Modal::Control { focus: 0, items });
     }
 
@@ -354,6 +367,8 @@ impl App {
             CtlAction::ReturnToGame => self.back_to_game(),
             CtlAction::CloseGame => self.close_game(None),
             CtlAction::Home => {}
+            CtlAction::Settings => self.open_settings(crate::modal::SetMenu::Main, 0),
+            CtlAction::Power => self.open_settings(crate::modal::SetMenu::Power, 0),
         }
     }
 

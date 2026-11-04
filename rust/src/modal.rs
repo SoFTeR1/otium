@@ -17,6 +17,54 @@ pub enum Modal {
     Message { title: String, text: String },
     News { news: crate::steam_api::News, game: String, fallback: Vec<String>, scroll: f32 },
     Trophies { title: String, items: Vec<crate::steam_api::Achievement>, focus: usize, scroll: f32 },
+    /// a settings screen: rows of "label ... value"
+    Settings { menu: SetMenu, title: String, items: Vec<SetItem>, focus: usize, scroll: f32 },
+    Keyboard(Box<crate::keyboard::Keyboard>),
+    Confirm { title: String, text: String, yes: SetKey, yes_label: &'static str, focus: usize },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SetMenu {
+    Main,
+    Account,
+    Discord,
+    Power,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SetKey {
+    User,
+    ImportSteam,
+    Account,
+    Discord,
+    Sort,
+    Layout,
+    Sounds,
+    Splash,
+    Fullscreen,
+    Autostart,
+    Tray,
+    Power,
+    Version,
+    ApiKey,
+    SteamId,
+    GetKey,
+    DiscordOn,
+    DiscordGame,
+    DiscordTimer,
+    DiscordState,
+    Sleep,
+    Restart,
+    Shutdown,
+    Quit,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetItem {
+    pub key: SetKey,
+    pub label: String,
+    pub value: String,
+    pub danger: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,6 +72,8 @@ pub enum CtlAction {
     ReturnToGame,
     CloseGame,
     Home,
+    Settings,
+    Power,
 }
 
 pub enum Action {
@@ -39,6 +89,9 @@ pub enum Action {
     AskDelete,
     Delete,
     OpenUrl(String),
+    Setting(SetMenu, SetKey, usize),
+    Text(crate::keyboard::Outcome),
+    Confirmed(SetKey),
 }
 
 const ADD_ITEMS: [&str; 2] = ["Импорт игр из Steam", "Выбрать exe или ярлык…"];
@@ -61,6 +114,9 @@ impl Modal {
             Modal::Import { list, .. } => list.len() + 1,
             Modal::Message { .. } | Modal::News { .. } => 1,
             Modal::Trophies { items, .. } => items.len(),
+            Modal::Settings { items, .. } => items.len(),
+            Modal::Confirm { .. } => 2,
+            Modal::Keyboard(_) => 0,
         }
     }
 
@@ -71,14 +127,17 @@ impl Modal {
             | Modal::ConfirmDelete { focus, .. }
             | Modal::Import { focus, .. }
             | Modal::Control { focus, .. }
-            | Modal::Trophies { focus, .. } => {
-                Some(focus)
-            }
-            Modal::Message { .. } | Modal::News { .. } => None,
+            | Modal::Trophies { focus, .. }
+            | Modal::Settings { focus, .. }
+            | Modal::Confirm { focus, .. } => Some(focus),
+            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) => None,
         }
     }
 
     pub fn handle(&mut self, nav: Nav) -> Action {
+        if let Modal::Keyboard(k) = self {
+            return k.handle(nav).map_or(Action::None, Action::Text);
+        }
         let n = self.item_count();
         if let Some(f) = self.focus_mut() {
             match nav {
@@ -116,6 +175,14 @@ impl Modal {
                 _ => Action::PickFile,
             },
             Modal::Control { focus, items } if nav == Nav::Ok => Action::Control(items[*focus].0),
+            Modal::Settings { menu, items, focus, .. } if nav == Nav::Ok => Action::Setting(*menu, items[*focus].key, *focus),
+            Modal::Confirm { yes, focus, .. } if nav == Nav::Ok => {
+                if *focus == 1 {
+                    Action::Confirmed(*yes)
+                } else {
+                    Action::Close
+                }
+            }
             Modal::Options { focus, running, .. } if nav == Nav::Ok => match focus {
                 0 if *running => Action::CloseGame,
                 0 => Action::Play,
@@ -163,6 +230,7 @@ impl Modal {
             Modal::Message { .. } => vec![(0, "OK")],
             Modal::News { .. } => vec![(0, "Открыть в браузере"), (1, "Закрыть")],
             Modal::Trophies { .. } => vec![(1, "Закрыть")],
+            Modal::Keyboard(_) => vec![(0, "Клавиша"), (3, "Стереть"), (2, "Пробел"), (1, "Отмена")],
             _ => vec![(0, "Выбрать"), (1, "Назад")],
         }
     }
@@ -183,6 +251,39 @@ impl Modal {
                 }
                 let r = panel(ui, screen, s, 620.0, game, items.len(), appear);
                 rows(ui, r, s, &items, *focus, appear);
+            }
+            Modal::Keyboard(k) => k.paint(ui, screen, s, appear),
+            Modal::Confirm { title, text, yes_label, focus, .. } => {
+                let r = panel(ui, screen, s, 620.0, title, 3, appear);
+                let galley = ui.painter().layout(text.clone(), font(19.0 * s), white(0.65 * appear), r.width() - 16.0 * s);
+                ui.painter().galley(r.left_top() + vec2(8.0 * s, 0.0), galley, Color32::WHITE);
+                let r = Rect::from_min_max(r.min + vec2(0.0, ROW * s), r.max);
+                rows(ui, r, s, &["Отмена", yes_label], *focus, appear);
+            }
+            Modal::Settings { title, items, focus, scroll, .. } => {
+                let visible = 9.min(items.len());
+                let r = panel(ui, screen, s, 860.0, title, visible, appear);
+                let target = (*focus as f32 - (visible as f32 - 2.0)).clamp(0.0, items.len().saturating_sub(visible) as f32);
+                *scroll += (target - *scroll) * (1.0 - (-dt * 18.0).exp());
+                let clip = ui.painter().with_clip_rect(r.expand(2.0));
+                for (i, it) in items.iter().enumerate() {
+                    let y = r.top() + (i as f32 - *scroll) * ROW * s;
+                    if y + ROW * s < r.top() || y > r.bottom() {
+                        continue;
+                    }
+                    let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    let f = i == *focus;
+                    if f {
+                        clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
+                    }
+                    let fg = match (f, it.danger) {
+                        (true, _) => Color32::from_rgb(10, 12, 18),
+                        (false, true) => Color32::from_rgb(255, 110, 110).gamma_multiply(appear),
+                        (false, false) => white(appear),
+                    };
+                    clip.text(pos2(row.left() + 20.0 * s, row.center().y), Align2::LEFT_CENTER, &it.label, semibold(21.0 * s), fg);
+                    clip.text(pos2(row.right() - 20.0 * s, row.center().y), Align2::RIGHT_CENTER, &it.value, font(19.0 * s), fg.gamma_multiply(0.65));
+                }
             }
             Modal::Control { focus, items } => {
                 let labels: Vec<&str> = items.iter().map(|(_, l)| *l).collect();

@@ -39,6 +39,9 @@ pub fn activate(h: isize) {
         let w = hwnd(h);
         if IsIconic(w).as_bool() {
             let _ = ShowWindow(w, SW_RESTORE);
+        } else if !IsWindowVisible(w).as_bool() {
+            // hidden in the tray
+            let _ = ShowWindow(w, windows::Win32::UI::WindowsAndMessaging::SW_SHOW);
         }
         keybd_event(0x12, 0, Default::default(), 0);
         keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0);
@@ -270,4 +273,53 @@ pub fn set_topmost(h: isize, on: bool) {
 
 pub fn is_window(h: isize) -> bool {
     h != 0 && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(hwnd(h)).as_bool() }
+}
+
+/// Shows a window hidden in the tray and brings it to the front.
+pub fn show(h: isize) {
+    activate(h);
+}
+
+pub fn hide(h: isize) {
+    if h != 0 {
+        unsafe {
+            let _ = ShowWindow(hwnd(h), windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+        }
+    }
+}
+
+/// Whether a window can be treated as a game: not a known shell / launcher / chat app, and
+/// covering its whole monitor unless `game_running` says a game is known to be up.
+pub fn looks_like_game(h: isize, game_running: bool) -> bool {
+    let pid = window_pid(h);
+    let Some(exe) = exe_path(pid) else { return false };
+    let stem = exe.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if NOT_GAMES.contains(&stem.as_str()) || EXTRA_NOT_GAMES.contains(&stem.as_str()) {
+        return false;
+    }
+    game_running || covers_monitor(h)
+}
+
+const EXTRA_NOT_GAMES: &[&str] = &[
+    "claude", "code", "devenv", "chrome", "msedge", "firefox", "browser", "opera", "telegram", "taskmgr",
+    "searchhost", "startmenuexperiencehost", "shellexperiencehost", "applicationframehost", "textinputhost",
+];
+
+fn covers_monitor(h: isize) -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    unsafe {
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd(h), &mut r).is_err() {
+            return false;
+        }
+        let m = MonitorFromWindow(hwnd(h), MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(m, &mut mi).as_bool() {
+            return false;
+        }
+        let mr = mi.rcMonitor;
+        r.left <= mr.left && r.top <= mr.top && r.right >= mr.right && r.bottom >= mr.bottom
+    }
 }

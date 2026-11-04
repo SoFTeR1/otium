@@ -2,15 +2,19 @@
 
 mod app;
 mod data;
+mod discord;
 mod draw;
 mod fonts;
 mod input;
+mod keyboard;
 mod launch;
 mod modal;
+mod sound;
 mod steam;
 mod media;
 mod steam_api;
 mod thumbs;
+mod tray;
 mod watch;
 mod win;
 

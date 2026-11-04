@@ -123,8 +123,9 @@ impl Library {
     pub fn sorted_games(&self) -> Vec<Game> {
         let mut games = self.games.clone();
         match self.setting_str("sortMode") {
-            "name" => games.sort_by_key(|g| g.name.to_lowercase()),
-            "recent" => games.sort_by(|a, b| {
+            "name" | "alpha" => games.sort_by_key(|g| g.name.to_lowercase()),
+            // like the Electron build, no setting means "recently played first"
+            "recent" | "" => games.sort_by(|a, b| {
                 b.last_played.unwrap_or(0.0).total_cmp(&a.last_played.unwrap_or(0.0))
             }),
             _ => games.sort_by(|a, b| {

@@ -25,6 +25,8 @@ pub enum Event {
     News { appid: String, items: Vec<crate::steam_api::News> },
     Trophies { appid: String, res: Result<crate::steam_api::Trophies, crate::steam_api::ApiError> },
     FeedDone { appid: String },
+    /// show the window (tray click); egui has to be told, or it keeps it hidden
+    Show,
     /// what's playing changed (None = nothing)
     Music(Option<crate::media::Music>),
 }
@@ -132,7 +134,8 @@ pub fn start_hotkey(bus: Bus, own: Arc<AtomicIsize>) {
         .name("hotkey".into())
         .spawn(move || unsafe {
             // hotkeys registered without a window are posted to this thread's queue
-            if RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x24).is_err() {
+            if let Err(e) = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x24) {
+                eprintln!("Ctrl+Alt+Home is taken: {e}");
                 return;
             }
             let mut msg = MSG::default();

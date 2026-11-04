@@ -32,12 +32,14 @@ pub struct Input {
     held: Option<(Nav, Instant, Instant)>,
     pub pad_kind: PadKind,
     pub pad_connected: bool,
+    /// the on-screen keyboard is open: letters, Enter and Backspace go to it, not to navigation
+    pub text_mode: bool,
 }
 
 impl Input {
     pub fn new() -> Self {
         let gilrs = Gilrs::new().map_err(|e| eprintln!("gamepad: {e}")).ok();
-        let mut me = Self { gilrs, held: None, pad_kind: PadKind::Xbox, pad_connected: false };
+        let mut me = Self { gilrs, held: None, pad_kind: PadKind::Xbox, pad_connected: false, text_mode: false };
         me.detect_pad();
         me
     }
@@ -78,6 +80,10 @@ impl Input {
                 (Insert, Nav::Add),
                 (Home, Nav::Guide),
             ] {
+                let typing_key = !matches!(key, ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Escape);
+                if self.text_mode && typing_key {
+                    continue;
+                }
                 if key_pressed(i, key) {
                     out.push(nav);
                 }

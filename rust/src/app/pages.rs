@@ -575,3 +575,11 @@ mod tests {
         assert_eq!(fmt_date(0.0), "");
     }
 }
+
+impl App {
+    /// The Steam key or account changed: trophies are fetched again.
+    pub(super) fn pages_forget_trophies(&mut self) {
+        self.pages.trophies.clear();
+        crate::steam_api::forget("ach");
+    }
+}

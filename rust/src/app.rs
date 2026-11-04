@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 mod pages;
 mod run;
+mod settings;
 pub use pages::fmt_date;
 use run::Launching;
 
@@ -91,6 +92,16 @@ pub struct App {
     /// set while a game has the screen: background polling pauses
     idle: Arc<std::sync::atomic::AtomicBool>,
     steam_user_local: Option<String>,
+
+    // ---- window / tray ----
+    tray: Option<crate::tray::Tray>,
+    quitting: bool,
+    tray_hinted: bool,
+    /// viewport commands queued by code that has no `egui::Context` at hand
+    pending_cmd: Vec<egui::ViewportCommand>,
+    last_text_target: Option<crate::keyboard::Target>,
+    /// the Discord status should be rebuilt (a game started or stopped)
+    discord_soon: bool,
 }
 
 impl App {
@@ -117,6 +128,7 @@ impl App {
         crate::watch::start_hotkey(bus.clone(), own.clone());
         crate::watch::start_steam(bus.clone());
         let steam_now = crate::watch::steam_running_now();
+        let tray = crate::tray::Tray::new(own.clone(), bus.clone());
         {
             let bus = bus.clone();
             crate::media::start(cc.egui_ctx.clone(), media_rx, idle.clone(), move |m| bus.send(crate::watch::Event::Music(m)));
@@ -158,8 +170,23 @@ impl App {
             media_tx,
             idle,
             steam_user_local,
+            tray,
+            quitting: false,
+            tray_hinted: false,
+            pending_cmd: Vec::new(),
+            last_text_target: None,
+            discord_soon: false,
             lib,
         };
+        // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
+        if app.splash_start.is_some() && app.sounds_on() && !crate::tray::started_at_login() {
+            crate::sound::play(crate::sound::Sfx::Splash);
+        }
+        if !app.lib.setting_str("discordId").is_empty() {
+            let id = app.lib.setting_str("discordId").to_string();
+            crate::discord::configure(Some(&id));
+            app.update_discord();
+        }
         // a Steam game that was already running when OTIUM started
         if steam_now != 0 {
             app.steam_since.insert(steam_now, SystemTime::now());
@@ -217,6 +244,28 @@ impl App {
     }
 
     fn handle(&mut self, nav: Nav, frame: &eframe::Frame) {
+        let before = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some());
+        self.handle_nav(nav, frame);
+        if !self.sounds_on() {
+            return;
+        }
+        let after = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some());
+        let sfx = if self.launching.is_some() && !before.4 {
+            Some(crate::sound::Sfx::Launch)
+        } else {
+            match nav {
+                Nav::Up | Nav::Down | Nav::Left | Nav::Right => Some(crate::sound::Sfx::Move),
+                Nav::Back if before != after || before.3 => Some(crate::sound::Sfx::Back),
+                Nav::Ok | Nav::Options | Nav::Add | Nav::Guide => Some(crate::sound::Sfx::Ok),
+                _ => None,
+            }
+        };
+        if let Some(s) = sfx {
+            crate::sound::play(s);
+        }
+    }
+
+    fn handle_nav(&mut self, nav: Nav, frame: &eframe::Frame) {
         if nav == Nav::Guide {
             return self.guide_pressed();
         }
@@ -286,6 +335,9 @@ impl App {
                     let _ = open::that_detached(&url);
                 }
             }
+            Action::Setting(menu, key, focus) => self.apply_setting(menu, key, focus),
+            Action::Text(o) => self.text_done(o),
+            Action::Confirmed(k) => self.confirmed(k),
             Action::Control(c) => {
                 self.modal = None;
                 self.control(c);
@@ -518,6 +570,17 @@ impl eframe::App for App {
         self.tick(ctx);
         self.tick_pages();
         self.idle.store(self.away_for_game, Ordering::Relaxed);
+        self.poll_tray();
+        self.on_close_requested(ctx);
+        for cmd in self.pending_cmd.drain(..) {
+            ctx.send_viewport_cmd(cmd);
+        }
+        // while the on-screen keyboard is open, a physical keyboard types into it
+        let typing = matches!(self.modal, Some(Modal::Keyboard(_)));
+        self.input.text_mode = typing;
+        if typing {
+            self.type_from_keyboard(ctx);
+        }
         let navs = self.input.poll(ctx);
 
         if ctx.input(|i| crate::input::key_pressed(i, egui::Key::F11)) {
@@ -628,7 +691,7 @@ impl App {
         if self.games.is_empty() {
             let p = ui.painter();
             p.text(rect.center() - vec2(0.0, 30.0 * s), Align2::CENTER_CENTER, "Библиотека пуста", semibold(40.0 * s), white(appear));
-            let add = if self.input.pad_kind == PadKind::PlayStation { "□" } else { "X" };
+            let add = if self.pad_kind() == PadKind::PlayStation { "□" } else { "X" };
             p.text(
                 rect.center() + vec2(0.0, 24.0 * s),
                 Align2::CENTER_CENTER,
@@ -791,7 +854,7 @@ impl App {
 
     /// Hint bar: (button, label) where button 0 = confirm, 1 = back, 2 = options, 3 = add.
     fn paint_hints(&self, ui: &egui::Ui, rect: Rect, s: f32, hints: &[(usize, &str)]) {
-        let glyphs: [&str; 4] = if self.input.pad_kind == PadKind::PlayStation { ["✕", "○", "△", "□"] } else { ["A", "B", "Y", "X"] };
+        let glyphs: [&str; 4] = if self.pad_kind() == PadKind::PlayStation { ["✕", "○", "△", "□"] } else { ["A", "B", "Y", "X"] };
         let p = ui.painter();
         let mut x = rect.right() - 96.0 * s;
         let y = rect.bottom() - 54.0 * s;
@@ -871,5 +934,26 @@ mod tests {
     #[test]
     fn names() {
         assert_eq!(name_from_path(std::path::Path::new("C:\\G\\my_cool-game.exe")), "my cool game");
+    }
+}
+
+impl App {
+    fn type_from_keyboard(&mut self, ctx: &egui::Context) {
+        let events = ctx.input(|i| i.events.clone());
+        let Some(Modal::Keyboard(k)) = self.modal.as_mut() else { return };
+        self.last_text_target = Some(k.target);
+        let mut done = None;
+        for e in events {
+            match e {
+                egui::Event::Text(t) => k.type_text(&t),
+                egui::Event::Paste(t) => k.type_text(&t),
+                egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => k.erase(),
+                egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => done = Some(k.finish()),
+                _ => {}
+            }
+        }
+        if let Some(o) = done {
+            self.text_done(o);
+        }
     }
 }
