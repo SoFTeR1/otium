@@ -34,7 +34,7 @@ function callUI() {
     el.innerHTML = `
       <div class="cs-glow"></div>
       <div class="cs">
-        <div class="cs-kicker"><span class="cs-live"></span>Голосовой звонок · PS5 Launcher</div>
+        <div class="cs-kicker"><span class="cs-live"></span>Голосовой звонок · OTIUM</div>
         <div class="cs-av">
           <i class="w w1"></i><i class="w w2"></i><i class="w w3"></i>
           ${avatar(call.pk, name, 'big')}

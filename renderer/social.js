@@ -90,7 +90,7 @@ async function publish(template) {
 }
 
 function publishProfile() {
-  return publish({ kind: 0, tags: [['t', APP_TAG]], content: JSON.stringify({ name: acct().name, display_name: acct().name, about: 'PS5 Launcher' }) });
+  return publish({ kind: 0, tags: [['t', APP_TAG]], content: JSON.stringify({ name: acct().name, display_name: acct().name, about: 'OTIUM' }) });
 }
 function publishContacts() {
   return publish({ kind: 3, tags: acct().friends.map((f) => ['p', f.pk, '', f.name]), content: '' });
@@ -478,7 +478,7 @@ function renderWelcome(el) {
     <div class="soc-top"><div class="soc-title">Друзья и сообщения</div><div class="d">${oskHint('back', 'назад')}</div></div>
     <div class="soc-welcome">
       ${CC_ICONS.chat}
-      <h2>Аккаунт PS5 Launcher</h2>
+      <h2>Аккаунт OTIUM</h2>
       <div class="d">Создайте аккаунт, чтобы добавлять друзей и переписываться прямо в лаунчере.<br>Регистрация не нужна — аккаунт создаётся на этом компьютере.</div>
       <input id="wName" class="${social.idx === 0 ? 'focus' : ''}" placeholder="Ваш ник" maxlength="24" value="${esc(social.draft || data.settings.user || '')}"/>
       <button class="btn primary ${social.idx === 1 ? 'focus' : ''}" id="wCreate">Создать аккаунт</button>
@@ -645,7 +645,7 @@ function openLoginModal() {
 function openFindModal() {
   openModal(`<h2>Найти друзей</h2>
     <div class="field"><label>Ник или код друга</label><input class="focusable" id="fFind" placeholder="Например: Artem или npub1…"/></div>
-    <div class="steam-list" id="findRes"><div class="meta"><span>Введите ник — покажем игроков PS5 Launcher</span></div></div>
+    <div class="steam-list" id="findRes"><div class="meta"><span>Введите ник — покажем игроков OTIUM</span></div></div>
     <div class="buttons"><button class="btn focusable" id="bClose">Закрыть</button></div>`, { onBack: closeModal });
   $('#bClose').onclick = closeModal;
   let t;

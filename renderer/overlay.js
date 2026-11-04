@@ -84,8 +84,8 @@ function showToast(m) {
   if (m.img) pic = `<div class="pic sq" style="background-image:url('${esc(m.img)}')"></div>`;
   else if (m.avatar) pic = `<div class="pic" style="${grad(m.avatar.key || m.avatar.name)}">${esc((m.avatar.name || '?')[0].toUpperCase())}</div>`;
   else pic = `<div class="pic emoji">${esc(m.icon || '🎮')}</div>`;
-  el.innerHTML = `<div class="app"><img src="icon.png">PS5 Launcher</div>
-    <div class="body">${pic}<div><div class="tt">${esc(m.title || 'PS5 Launcher')}</div><div class="tx">${esc(m.text)}</div></div></div>`;
+  el.innerHTML = `<div class="app"><img src="icon.png">OTIUM</div>
+    <div class="body">${pic}<div><div class="tt">${esc(m.title || 'OTIUM')}</div><div class="tx">${esc(m.text)}</div></div></div>`;
   $('#toasts').appendChild(el);
   st.toasts.push(el);
   while (st.toasts.length > 3) st.toasts.shift().remove();

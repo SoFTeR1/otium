@@ -3,3 +3,4 @@ dist/
 .claude/
 *.log
 build/preview-*.png
+build/icon-preview.png

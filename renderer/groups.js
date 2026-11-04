@@ -380,7 +380,7 @@ function groupRingUI() {
   el.className = 'call incoming';
   el.style.setProperty('--h', hue(g.id));
   el.innerHTML = `<div class="cs-glow"></div><div class="cs">
-    <div class="cs-kicker"><span class="cs-live"></span>Групповой звонок · PS5 Launcher</div>
+    <div class="cs-kicker"><span class="cs-live"></span>Групповой звонок · OTIUM</div>
     <div class="cs-av"><i class="w w1"></i><i class="w w2"></i><i class="w w3"></i>${groupAvatar(g, 'big')}</div>
     <div class="cs-name">${esc(groupTitle(g))}</div>
     <div class="cs-status">${esc(memberName(g, ringing.from))} зовёт в голосовой</div>

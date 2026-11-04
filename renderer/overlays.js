@@ -52,7 +52,7 @@ function renderOSK() {
         ${keyHTML('Готово', 'done', 'wide done')}
       </div>
     </div>
-    <div class="osk-hints"><span><b class="kb">LB</b> ${osk.caps ? 'строчные' : 'заглавные'}</span>${oskHint('add', 'стереть')}${oskHint('menu', 'пробел')}<span><b class="kb">Start</b> готово</span>${oskHint('back', 'закрыть')}</div>`;
+    <div class="osk-hints"><span><b class="kb">LB</b> ${osk.caps ? 'строчные' : 'заглавные'}</span><span><b class="kb">RB</b> стереть</span>${oskHint('add', 'стереть')}${oskHint('menu', 'пробел')}<span><b class="kb">Start</b> готово</span>${oskHint('back', 'закрыть')}</div>`;
   const keys = $$('#osk .key');
   // keep the cursor on the "same" key after re-render
   const prev = osk.el;
@@ -124,7 +124,7 @@ function moveKey(dir) {
 function oskHandle(act) {
   if (DIRS.has(act)) return moveKey(act);
   if (act === 'ok') return pressKey(osk.el);
-  if (act === 'add') return pressKey('back');
+  if (act === 'add' || act === 'rb') return pressKey('back');
   if (act === 'menu') return pressKey('space');
   if (act === 'start') return closeOSK(true);
   if (act === 'lb') { osk.caps = !osk.caps; osk.shift = false; sfx.move(); return renderOSK(); }

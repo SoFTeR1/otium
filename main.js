@@ -14,6 +14,32 @@ try {
   ({ autoUpdater } = require('electron-updater'));
 } catch {}
 
+// PS5 Launcher → OTIUM: move the old data folder (library, covers, accounts) to the new name once.
+// Library entries keep absolute links to their media, so those are rewritten too. If the folder
+// can't be moved (still locked), keep using it where it is.
+(function migrateLegacyData() {
+  try {
+    const legacy = path.join(app.getPath('appData'), 'PS5 Launcher');
+    const current = app.getPath('userData');
+    if (legacy === current || !fs.existsSync(path.join(legacy, 'library.json')) || fs.existsSync(path.join(current, 'library.json'))) return;
+    try {
+      if (fs.existsSync(current)) fs.rmSync(current, { recursive: true, force: true }); // empty shell from an earlier start
+      fs.renameSync(legacy, current);
+    } catch {
+      app.setPath('userData', legacy);
+      return;
+    }
+    const db = path.join(current, 'library.json');
+    const swaps = [
+      [pathToFileURL(legacy).href, pathToFileURL(current).href],
+      [JSON.stringify(legacy).slice(1, -1), JSON.stringify(current).slice(1, -1)]
+    ];
+    let text = fs.readFileSync(db, 'utf8');
+    for (const [from, to] of swaps) text = text.split(from).join(to);
+    fs.writeFileSync(db, text);
+  } catch {}
+})();
+
 const DATA_DIR = app.getPath('userData');
 const DB_FILE = path.join(DATA_DIR, 'library.json');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
@@ -24,7 +50,7 @@ const DEFAULT_DATA = {
   settings: {
     user: 'Player', sounds: true, fullscreen: true, autostart: false,
     bgMode: 'game', wallpaper: '', liveTrailers: true, steamApiKey: '', steamId: '',
-    // the shared "PS5 Launcher" Discord application — an app ID is public, everyone can use the same one
+    // the shared Discord application (registered as "PS5 Launcher") — an app ID is public, everyone can use the same one
     discordId: '1567308312947728414',
     closeToTray: true,
     splash: true
@@ -75,7 +101,7 @@ function createWindow() {
     fullscreen: settings.fullscreen,
     backgroundColor: '#000814',
     autoHideMenuBar: true,
-    title: 'PS5 Launcher',
+    title: 'OTIUM',
     icon: path.join(__dirname, 'renderer', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -118,9 +144,9 @@ let trayHinted = false;
 function createTray() {
   const img = nativeImage.createFromPath(path.join(__dirname, 'renderer', 'icon.png')).resize({ width: 32, height: 32 });
   tray = new Tray(img);
-  tray.setToolTip('PS5 Launcher');
+  tray.setToolTip('OTIUM');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Открыть PS5 Launcher', click: () => forceFront() },
+    { label: 'Открыть OTIUM', click: () => forceFront() },
     { label: 'Центр управления', click: () => { forceFront(); send('pad:guide', { from: 'background', canReturn: !!gameHwnd }); } },
     { type: 'separator' },
     { label: 'Выйти', click: () => { quitting = true; app.quit(); } }
@@ -136,7 +162,7 @@ function hideToTray() {
     trayHinted = true;
     tray?.displayBalloon({
       iconType: 'info',
-      title: 'PS5 Launcher работает в трее',
+      title: 'OTIUM работает в трее',
       content: 'Откройте его значком в трее, кнопкой Xbox на геймпаде или Ctrl+Alt+Home. Выйти — правой кнопкой по значку.'
     });
   }

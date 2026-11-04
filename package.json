@@ -1,10 +1,10 @@
 {
-  "name": "ps5-launcher",
-  "productName": "PS5 Launcher",
-  "version": "1.8.3",
-  "description": "PS5 Launcher",
+  "name": "otium",
+  "productName": "OTIUM",
+  "version": "2.0.0",
+  "description": "OTIUM — игровой лаунчер для Windows в стиле PS5, для игры на телевизоре с геймпада",
   "author": "SoFTeR1",
-  "repository": "github:SoFTeR1/ps5-launcher",
+  "repository": "github:SoFTeR1/otium",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "local.ps5launcher",
-    "productName": "PS5 Launcher",
+    "productName": "OTIUM",
     "copyright": "SoFTeR1",
     "directories": {
       "buildResources": "build"
@@ -29,9 +29,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "PS5 Launcher",
-      "uninstallDisplayName": "PS5 Launcher",
-      "artifactName": "PS5-Launcher-Setup-${version}.${ext}",
+      "shortcutName": "OTIUM",
+      "uninstallDisplayName": "OTIUM",
+      "artifactName": "OTIUM-Setup-${version}.${ext}",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
@@ -49,7 +49,7 @@
     "publish": {
       "provider": "github",
       "owner": "SoFTeR1",
-      "repo": "ps5-launcher"
+      "repo": "otium"
     },
     "files": [
       "main.js",

@@ -2,7 +2,7 @@
 // Profile pages (own + friends), the power menu, Discord Rich Presence and trophy tracking.
 
 const STEAM_CDN = 'https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps';
-const APP_ICON_URL = 'https://raw.githubusercontent.com/SoFTeR1/ps5-launcher/main/build/icon.png';
+const APP_ICON_URL = 'https://raw.githubusercontent.com/SoFTeR1/otium/main/build/icon.png';
 const pf = { open: false, idx: 0, stack: [] };   // stack of views: { kind: 'me' | 'friend' | 'steam', id }
 
 // ---------- generic spatial navigation for card layouts ----------
@@ -102,7 +102,7 @@ async function renderProfile() {
     body = `
       <div class="pf-head">${pfAvatar(name, me?.pk || name)}
         <div><div class="pf-name">${esc(name)}</div>
-        <div class="d">В PS5 Launcher с ${fmtDate(since()).replace(/^сегодня.*/, 'сегодня')}${a?.sk ? ` · код ${shortCode(me.pk)}` : ''}</div>
+        <div class="d">В OTIUM с ${fmtDate(since()).replace(/^сегодня.*/, 'сегодня')}${a?.sk ? ` · код ${shortCode(me.pk)}` : ''}</div>
         <div class="d ${nowPlaying ? 'game' : ''}">${nowPlaying ? `● Играет в ${esc(nowPlaying.name)}` : '● В сети'}</div></div>
         <div class="pf-stats">${statChip(games.length, 'игр')}${statChip(hours(total), 'наиграно')}${statChip(lf.length, 'друзей')}</div>
       </div>
@@ -124,7 +124,7 @@ async function renderProfile() {
     body = `
       <div class="pf-head">${pfAvatar(nameOf(pk), pk)}
         <div><div class="pf-name">${esc(nameOf(pk))}</div>
-        <div class="d">${lib?.since ? `В PS5 Launcher с ${fmtDate(lib.since)}` : 'Игрок PS5 Launcher'} · код ${shortCode(pk)}</div>
+        <div class="d">${lib?.since ? `В OTIUM с ${fmtDate(lib.since)}` : 'Игрок OTIUM'} · код ${shortCode(pk)}</div>
         <div class="d ${p.game ? 'game' : ''}">● ${esc(p.text)}</div></div>
         <div class="pf-stats">${statChip(games.length, 'игр')}${statChip(hours(games.reduce((s, g) => s + (g.p || 0), 0)), 'наиграно')}</div>
       </div>
@@ -414,20 +414,20 @@ function updateDiscord() {
     const start = steamSince[sid] || launchStarted[g.id] || Date.now();
     ipc.discordActivity({
       details: `Играет в ${g.name}`,
-      state: 'через PS5 Launcher',
+      state: 'через OTIUM',
       timestamps: { start },
       assets: {
         large_image: sid ? `${STEAM_CDN}/${sid}/header.jpg` : APP_ICON_URL,
         large_text: g.name,
         small_image: APP_ICON_URL,
-        small_text: 'PS5 Launcher'
+        small_text: 'OTIUM'
       }
     });
   } else {
     ipc.discordActivity({
       details: 'В главном меню',
       state: `${data.games.length} ${plural(data.games.length, 'игра', 'игры', 'игр')} в библиотеке`,
-      assets: { large_image: APP_ICON_URL, large_text: 'PS5 Launcher' }
+      assets: { large_image: APP_ICON_URL, large_text: 'OTIUM' }
     });
   }
 }

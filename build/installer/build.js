@@ -1,4 +1,4 @@
-// Compiles the branded web installer (dist/PS5-Launcher-Installer.exe) with the .NET Framework C# compiler.
+// Compiles the branded web installer (dist/OTIUM-Installer.exe) with the .NET Framework C# compiler.
 // Run after electron-builder so the unpacked size (used for the progress bar) is known.
 const fs = require('fs');
 const path = require('path');
@@ -20,12 +20,12 @@ function dirSize(dir) {
 const unpacked = path.join(root, 'dist', 'win-unpacked');
 const bytes = fs.existsSync(unpacked) ? dirSize(unpacked) : 0;
 
-const tmp = path.join(require('os').tmpdir(), 'ps5l-installer');
+const tmp = path.join(require('os').tmpdir(), 'otium-installer');
 fs.mkdirSync(tmp, { recursive: true });
 const src = path.join(tmp, 'Installer.cs');
 fs.writeFileSync(src, fs.readFileSync(path.join(__dirname, 'Installer.cs'), 'utf8').replace('__BYTES__', String(bytes)).replace('__VERSION__', version));
 
-const out = path.join(root, 'dist', 'PS5-Launcher-Installer.exe');
+const out = path.join(root, 'dist', 'OTIUM-Installer.exe');
 execFileSync(path.join(fw, 'csc.exe'), [
   '/nologo', '/target:winexe', '/optimize+', '/codepage:65001',
   `/out:${out}`,

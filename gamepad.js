@@ -19,7 +19,7 @@ public static class PadWatch {
   [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
   [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  static readonly string[] NotGames = { "steam", "steamwebhelper", "steamerrorreporter", "gameoverlayui", "explorer", "ps5 launcher",
+  static readonly string[] NotGames = { "steam", "steamwebhelper", "steamerrorreporter", "gameoverlayui", "explorer", "ps5 launcher", "otium",
     "powershell", "conhost", "discord", "epicgameslauncher", "eadesktop", "ubisoftconnect", "upc", "galaxyclient", "battle.net", "crashpad_handler" };
   // The game is the top-most visible window whose process started after we launched it.
   // It may take a while to appear, so keep looking for up to 25 seconds.

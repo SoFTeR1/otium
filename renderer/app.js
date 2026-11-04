@@ -119,7 +119,7 @@ function toast(msg, err = false, opts = {}) {
     const h = hue(opts.avatar.key || opts.avatar.name);
     pic = `<div class="note-pic letter" style="background:linear-gradient(135deg,hsl(${h} 65% 45%),hsl(${(h + 60) % 360} 65% 30%))">${esc((opts.avatar.name || '?')[0].toUpperCase())}</div>`;
   } else pic = opts.icon ? `<div class="note-pic emoji">${esc(opts.icon)}</div>` : '<div class="note-pic" style="background-image:url(icon.png)"></div>';
-  el.innerHTML = `${pic}<div class="note-body"><div class="note-title">${esc(opts.title || (err ? 'Ошибка' : 'PS5 Launcher'))}</div><div class="note-text">${esc(msg)}</div></div>`;
+  el.innerHTML = `${pic}<div class="note-body"><div class="note-title">${esc(opts.title || (err ? 'Ошибка' : 'OTIUM'))}</div><div class="note-text">${esc(msg)}</div></div>`;
   box.appendChild(el);
   while (box.children.length > 3) box.firstElementChild.remove();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
@@ -492,7 +492,7 @@ function fillInfo(g) {
   title.classList.remove('hidden');
   if (!g && tab === 'activity') {
     title.textContent = 'Найти друзей';
-    $('#meta').innerHTML = `<span>${list.length ? 'Добавьте друзей по нику или коду' : 'Здесь будут друзья из PS5 Launcher и Steam — и во что они играют'}</span>`;
+    $('#meta').innerHTML = `<span>${list.length ? 'Добавьте друзей по нику или коду' : 'Здесь будут друзья из OTIUM и Steam — и во что они играют'}</span>`;
     $('#btnPlay').textContent = 'Найти';
     return;
   }
@@ -504,7 +504,7 @@ function fillInfo(g) {
   }
   title.textContent = g.name;
   if (g.kind === 'friend') {
-    $('#meta').innerHTML = `<span class="${g.game ? 'live' : ''}">● ${esc(g.status)}</span><span>${g.src === 'steam' ? 'Друг в Steam' : 'Друг в PS5 Launcher'}</span>`;
+    $('#meta').innerHTML = `<span class="${g.game ? 'live' : ''}">● ${esc(g.status)}</span><span>${g.src === 'steam' ? 'Друг в Steam' : 'Друг в OTIUM'}</span>`;
     $('#btnPlay').textContent = 'Профиль';
     return;
   }
@@ -1013,6 +1013,7 @@ function openSettings(focus = 0) {
     ['trailers', 'Живые фоны (трейлеры игр)', onoff(s.liveTrailers)],
     ['sep'],
     ['layout', 'Кнопки геймпада', LAYOUT_NAMES[s.padLayout || 'auto']],
+    ['padtest', 'Геймпад: проверка и калибровка', activePad() ? (s.padCal?.[activePad().id] ? 'Откалиброван' : 'Подключён') : 'Не подключён'],
     ['sounds', 'Звуки интерфейса', onoff(s.sounds)],
     ['splash', 'Заставка при запуске', onoff(s.splash !== false)],
     ['fullscreen', 'Полноэкранный режим', onoff(s.fullscreen)],
@@ -1039,6 +1040,7 @@ function openSettings(focus = 0) {
       return openSettings(i);
     }
     if (id === 'sounds') return toggle('sounds');
+    if (id === 'padtest') return openPadTest();
     if (id === 'splash') { s.splash = s.splash === false; await save(); return openSettings(i); }
     if (id === 'fullscreen') return toggle('fullscreen', ipc.setFullscreen);
     if (id === 'account') return openSteamAccount();
@@ -1207,6 +1209,8 @@ function handle(act, src) {
     if (act === 'back' && launching) { sfx.back(); launching.cancel(); }
     return;
   }
+  // the pad test reads the pad itself (every button is "being tested"); keyboard still navigates it
+  if (padTestOpen() && src === 'pad') return;
   // Home key = the Guide button: toggle the Control Center
   if (act === 'guide') {
     if (osk.open) closeOSK(false);
@@ -1218,6 +1222,16 @@ function handle(act, src) {
   if (callCardOpen()) return callHandle(act);
   if (groupRingOpen()) return groupRingHandle(act);
   if (act === 'lb') return;
+  // RB = backspace in any text field (the chat box, search, names)
+  if (act === 'rb') {
+    const i = document.activeElement;
+    if (i && (i.tagName === 'INPUT' || i.tagName === 'TEXTAREA') && i.value) {
+      i.value = i.value.slice(0, -1);
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      sfx.move();
+    }
+    return;
+  }
   if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);
   if (cc.open) return ccHandle(act);
@@ -1284,8 +1298,10 @@ window.addEventListener('keydown', (e) => {
 });
 
 // Gamepad: A/✕=ok, B/○=back, X/□=add, Y/△ or Start=menu, D-pad / left stick = move
-const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 4: 'lb', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
-const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'lb', 'start', 'up', 'down', 'left', 'right'];
+const PAD_BUTTONS = { 0: 'ok', 1: 'back', 2: 'add', 3: 'menu', 4: 'lb', 5: 'rb', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
+const PAD_ACTS = ['ok', 'back', 'add', 'menu', 'lb', 'rb', 'start', 'up', 'down', 'left', 'right'];
+// held: directions and RB (backspace) repeat
+const REPEATS = new Set([...DIRS, 'rb']);
 const padState = {};
 function pollPads() {
   const now = performance.now();
@@ -1294,7 +1310,7 @@ function pollPads() {
     const st = (padState[gp.index] ??= {});
     const held = {};
     for (const [b, act] of Object.entries(PAD_BUTTONS)) if (gp.buttons[b]?.pressed) held[act] = true;
-    const [ax = 0, ay = 0] = gp.axes;
+    const [ax, ay] = padAxes(gp, 0); // calibrated left stick
     if (ax < -0.6) held.left = true;
     if (ax > 0.6) held.right = true;
     if (ay < -0.6) held.up = true;
@@ -1302,7 +1318,7 @@ function pollPads() {
     for (const act of PAD_ACTS) {
       if (!held[act]) { st[act] = 0; continue; }
       if (!st[act]) { st[act] = now + 380; padFire(act, gp); }
-      else if (DIRS.has(act) && now >= st[act]) { st[act] = now + 110; padFire(act, gp); }
+      else if (REPEATS.has(act) && now >= st[act]) { st[act] = now + (act === 'rb' ? 90 : 110); padFire(act, gp); }
     }
   }
   requestAnimationFrame(pollPads);
@@ -1325,7 +1341,8 @@ function renderHints() {
 }
 function detectLayout(gp) {
   const id = gp.id.toLowerCase();
-  const l = /054c|dualsense|dualshock|wireless controller|playstation/.test(id) ? 'ps' : /xbox|xinput|045e/.test(id) ? 'xbox' : null;
+  // Xbox first: "Xbox Wireless Controller" also contains "wireless controller" (Sony's generic name)
+  const l = /xbox|xinput|045e/.test(id) ? 'xbox' : /054c|dualsense|dualshock|wireless controller|playstation/.test(id) ? 'ps' : null;
   if (l && l !== detectedLayout) {
     detectedLayout = l;
     renderHints();

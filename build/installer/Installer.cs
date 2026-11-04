@@ -1,4 +1,4 @@
-// PS5 Launcher web installer: a small branded WPF window that downloads the latest release from GitHub,
+// OTIUM web installer: a small branded WPF window that downloads the latest release from GitHub,
 // runs the NSIS package silently and launches the app. Compiled with the .NET Framework csc (C# 5).
 using System;
 using System.Diagnostics;
@@ -16,8 +16,8 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("PS5 Launcher Installer")]
-[assembly: AssemblyProduct("PS5 Launcher")]
+[assembly: AssemblyTitle("OTIUM Installer")]
+[assembly: AssemblyProduct("OTIUM")]
 [assembly: AssemblyCompany("SoFTeR1")]
 [assembly: AssemblyVersion("__VERSION__.0")]
 
@@ -33,7 +33,9 @@ public static class Program
 
 public class InstallerWindow : Window
 {
-    const string Releases = "https://github.com/SoFTeR1/ps5-launcher/releases/latest/download/";
+    const string Releases = "https://github.com/SoFTeR1/otium/releases/latest/download/";
+    // the app was called "PS5 Launcher" before 2.0; installs from then are upgraded in place
+    static readonly string[] ExeNames = { "OTIUM", "PS5 Launcher" };
     // electron-builder keeps the previous install folder here (derived from the appId)
     const string RegKey = @"Software\ab98e456-26bd-5f85-9fce-95c7943e0e2f";
     const long UnpackedBytes = __BYTES__;
@@ -50,8 +52,8 @@ public class InstallerWindow : Window
 
     public InstallerWindow()
     {
-        Title = "Установка PS5 Launcher";
-        Width = 820; Height = 500;
+        Title = "Установка OTIUM";
+        Width = 860; Height = 520;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -69,7 +71,9 @@ public class InstallerWindow : Window
         icon.CacheOption = BitmapCacheOption.OnLoad;
         icon.EndInit();
         Get<Image>("Logo").Source = icon;
+        Get<Image>("IntroLogo").Source = icon;
         Icon = icon;
+        AddStars();
 
         root.MouseLeftButtonDown += (s, e) => { if (e.ButtonState == MouseButtonState.Pressed) DragMove(); };
         Get<Button>("BtnClose").Click += (s, e) => { if (!busy) Close(); };
@@ -86,8 +90,93 @@ public class InstallerWindow : Window
         Loaded += async (s, e) =>
         {
             BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450)));
+            var intro = PlayIntro();
             await LoadVersion();
+            await intro;
         };
+    }
+
+    // ---------- look ----------
+    static readonly Random Rnd = new Random();
+    static Duration Ms(double ms) { return new Duration(TimeSpan.FromMilliseconds(ms)); }
+    static DoubleAnimation Anim(double from, double to, double ms, double delay = 0, IEasingFunction ease = null)
+    {
+        return new DoubleAnimation(from, to, Ms(ms))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(delay),
+            EasingFunction = ease ?? new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.HoldEnd
+        };
+    }
+
+    // soft lights scattered over the window, each breathing at its own pace
+    void AddStars()
+    {
+        var canvas = Get<Canvas>("Stars");
+        for (int i = 0; i < 46; i++)
+        {
+            double size = 1.5 + Math.Pow(Rnd.NextDouble(), 3) * 7;
+            var dot = new System.Windows.Shapes.Ellipse { Width = size * 3, Height = size * 3, Opacity = 0 };
+            var b = new RadialGradientBrush();
+            b.GradientStops.Add(new GradientStop(Color.FromArgb(255, 235, 244, 255), 0));
+            b.GradientStops.Add(new GradientStop(Color.FromArgb(120, 150, 190, 255), 0.25));
+            b.GradientStops.Add(new GradientStop(Color.FromArgb(0, 120, 170, 255), 1));
+            dot.Fill = b;
+            Canvas.SetLeft(dot, Rnd.NextDouble() * 830);
+            Canvas.SetTop(dot, Rnd.NextDouble() * 490);
+            canvas.Children.Add(dot);
+            var tw = new DoubleAnimation(0.08 + Rnd.NextDouble() * 0.2, 0.45 + Rnd.NextDouble() * 0.5, Ms(1600 + Rnd.NextDouble() * 2600))
+            {
+                AutoReverse = true,
+                RepeatBehavior = RepeatBehavior.Forever,
+                BeginTime = TimeSpan.FromMilliseconds(Rnd.NextDouble() * 2500),
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+            };
+            dot.BeginAnimation(OpacityProperty, tw);
+        }
+        // the aura breathes; a band of light crosses the window every few seconds
+        Get<FrameworkElement>("Aura").BeginAnimation(OpacityProperty, new DoubleAnimation(0.38, 0.62, Ms(4200))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+        var sweep = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever, BeginTime = TimeSpan.FromMilliseconds(1600) };
+        sweep.KeyFrames.Add(new DiscreteDoubleKeyFrame(-400, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        sweep.KeyFrames.Add(new EasingDoubleKeyFrame(1200, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(2600)), new SineEase { EasingMode = EasingMode.EaseInOut }));
+        sweep.KeyFrames.Add(new DiscreteDoubleKeyFrame(1200, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(9000))));
+        ((TranslateTransform)root.FindName("SweepX")).BeginAnimation(TranslateTransform.XProperty, sweep);
+    }
+
+    // the mark alone in the middle, then it hands over to the installer
+    async Task PlayIntro()
+    {
+        var logo = Get<FrameworkElement>("IntroLogo");
+        var word = Get<FrameworkElement>("IntroWord");
+        var scale = (ScaleTransform)root.FindName("IntroScale");
+        var back = new BackEase { Amplitude = 0.35, EasingMode = EasingMode.EaseOut };
+        logo.BeginAnimation(OpacityProperty, Anim(0, 1, 900, 150));
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, Anim(0.82, 1, 1100, 150, back));
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, Anim(0.82, 1, 1100, 150, back));
+        var wt = new TranslateTransform(0, 14);
+        word.RenderTransform = wt;
+        word.BeginAnimation(OpacityProperty, Anim(0, 1, 900, 650));
+        wt.BeginAnimation(TranslateTransform.YProperty, Anim(14, 0, 1000, 650));
+        await Task.Delay(2300);
+
+        var intro = Get<FrameworkElement>("Intro");
+        var st = new ScaleTransform(1, 1, 414, 244);
+        intro.RenderTransform = st;
+        intro.BeginAnimation(OpacityProperty, Anim(1, 0, 650));
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, Anim(1, 1.08, 800));
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, Anim(1, 1.08, 800));
+        var main = Get<FrameworkElement>("Main");
+        var mt = new TranslateTransform(0, 18);
+        main.RenderTransform = mt;
+        main.BeginAnimation(OpacityProperty, Anim(0, 1, 700, 250));
+        mt.BeginAnimation(TranslateTransform.YProperty, Anim(18, 0, 800, 250));
+        await Task.Delay(1000);
+        intro.Visibility = Visibility.Collapsed;
     }
 
     static string DefaultDir()
@@ -95,24 +184,28 @@ public class InstallerWindow : Window
         // a running launcher knows best where it lives
         try
         {
-            foreach (var p in Process.GetProcessesByName("PS5 Launcher"))
-            {
-                var dir = Path.GetDirectoryName(p.MainModule.FileName);
-                if (Directory.Exists(dir)) return dir;
-            }
+            foreach (var name in ExeNames)
+                foreach (var p in Process.GetProcessesByName(name))
+                {
+                    var dir = Path.GetDirectoryName(p.MainModule.FileName);
+                    if (Directory.Exists(dir)) return dir;
+                }
         }
         catch { }
-        try
+        foreach (var name in ExeNames)
         {
-            var lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "PS5 Launcher.lnk");
-            if (File.Exists(lnk))
+            try
             {
-                dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
-                string target = shell.CreateShortcut(lnk).TargetPath;
-                if (File.Exists(target)) return Path.GetDirectoryName(target);
+                var lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), name + ".lnk");
+                if (File.Exists(lnk))
+                {
+                    dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                    string target = shell.CreateShortcut(lnk).TargetPath;
+                    if (File.Exists(target)) return Path.GetDirectoryName(target);
+                }
             }
+            catch { }
         }
-        catch { }
         try
         {
             using (var k = Registry.CurrentUser.OpenSubKey(RegKey))
@@ -122,14 +215,14 @@ public class InstallerWindow : Window
             }
         }
         catch { }
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "PS5 Launcher");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OTIUM");
     }
 
     static WebClient Client()
     {
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         var wc = new WebClient();
-        wc.Headers.Add("User-Agent", "PS5LauncherInstaller");
+        wc.Headers.Add("User-Agent", "OTIUMInstaller");
         return wc;
     }
 
@@ -146,7 +239,7 @@ public class InstallerWindow : Window
                 if (l.StartsWith("path:")) setupFile = l.Substring(5).Trim().Trim('\'', '"');
             }
             Get<TextBlock>("VersionText").Text = "Версия " + version;
-            bool upgrade = File.Exists(Path.Combine(installDir, "PS5 Launcher.exe"));
+            bool upgrade = ExeNames.Any(n => File.Exists(Path.Combine(installDir, n + ".exe")));
             Get<TextBlock>("WelcomeTitle").Text = upgrade ? "Обновление готово к установке" : "Всё готово к установке";
             Get<TextBlock>("BtnInstallText").Text = upgrade ? "Обновить" : "Установить";
         }
@@ -160,11 +253,12 @@ public class InstallerWindow : Window
     {
         using (var d = new System.Windows.Forms.FolderBrowserDialog())
         {
-            d.Description = "Куда установить PS5 Launcher?";
+            d.Description = "Куда установить OTIUM?";
             d.SelectedPath = Directory.Exists(installDir) ? installDir : Path.GetDirectoryName(installDir);
             if (d.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
             var p = d.SelectedPath;
-            if (!p.TrimEnd('\\').EndsWith("PS5 Launcher", StringComparison.OrdinalIgnoreCase)) p = Path.Combine(p, "PS5 Launcher");
+            var leaf = Path.GetFileName(p.TrimEnd('\\'));
+            if (!ExeNames.Any(n => leaf.Equals(n, StringComparison.OrdinalIgnoreCase))) p = Path.Combine(p, "OTIUM");
             installDir = p;
             Get<TextBlock>("PathText").Text = installDir;
         }
@@ -212,7 +306,7 @@ public class InstallerWindow : Window
                 wc.DownloadProgressChanged += (s, e) =>
                 {
                     double total = e.TotalBytesToReceive > 0 ? e.TotalBytesToReceive : 82e6;
-                    SetProgress(0.6 * e.BytesReceived / total, "Загрузка PS5 Launcher " + version,
+                    SetProgress(0.6 * e.BytesReceived / total, "Загрузка OTIUM " + version,
                         string.Format("{0:0.0} из {1:0.0} МБ", e.BytesReceived / 1048576.0, total / 1048576.0));
                 };
                 await wc.DownloadFileTaskAsync(new Uri(Releases + setupFile), tmp);
@@ -232,10 +326,11 @@ public class InstallerWindow : Window
 
             // 2. close a running launcher so its files can be replaced
             SetProgress(0.6, "Подготовка…", "");
-            foreach (var p in Process.GetProcessesByName("PS5 Launcher"))
-            {
-                try { p.CloseMainWindow(); if (!p.WaitForExit(2500)) p.Kill(); } catch { }
-            }
+            foreach (var name in ExeNames)
+                foreach (var p in Process.GetProcessesByName(name))
+                {
+                    try { p.CloseMainWindow(); if (!p.WaitForExit(2500)) p.Kill(); } catch { }
+                }
 
             // 3. silent install (60–100%); NSIS reads the folder from the registry, /D covers fresh installs
             using (var k = Registry.CurrentUser.CreateSubKey(RegKey)) k.SetValue("InstallLocation", installDir);
@@ -278,6 +373,6 @@ public class InstallerWindow : Window
 
     void Launch()
     {
-        try { Process.Start(Path.Combine(installDir, "PS5 Launcher.exe")); } catch { }
+        try { Process.Start(Path.Combine(installDir, "OTIUM.exe")); } catch { }
     }
 }
