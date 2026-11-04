@@ -194,6 +194,7 @@ impl App {
             reorder: false,
             lib,
         };
+        app.input.set_cal(app.lib.settings.get("padCal"));
         app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
         if app.splash_start.is_some() && app.sounds_on() && !crate::tray::started_at_login() {
@@ -595,7 +596,12 @@ impl eframe::App for App {
         if typing {
             self.type_from_keyboard(ctx);
         }
+        self.input.test_mode = matches!(self.modal, Some(Modal::PadTest(_)));
         let navs = self.input.poll(ctx);
+        if self.input.test_mode {
+            self.pad_test_tick();
+            ctx.request_repaint();
+        }
 
         if ctx.input(|i| crate::input::key_pressed(i, egui::Key::F11)) {
             self.fullscreen = !self.fullscreen;

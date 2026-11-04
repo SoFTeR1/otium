@@ -10,6 +10,7 @@ mod input;
 mod keyboard;
 mod launch;
 mod nostr;
+mod padtest;
 mod modal;
 mod sound;
 mod steam;

@@ -20,6 +20,7 @@ pub enum Modal {
     /// a settings screen: rows of "label ... value"
     Settings { menu: SetMenu, title: String, items: Vec<SetItem>, focus: usize, scroll: f32 },
     Keyboard(Box<crate::keyboard::Keyboard>),
+    PadTest(Box<crate::padtest::PadTest>),
     Confirm { title: String, text: String, yes: SetKey, yes_label: &'static str, focus: usize },
     /// "find friends" results: (public key, name, state)
     Players { items: Vec<(String, String, String)>, focus: usize, scroll: f32 },
@@ -95,6 +96,7 @@ pub enum SetKey {
     EditCoverReset,
     EditBackground,
     EditBackgroundReset,
+    PadTest,
 }
 
 #[derive(Clone, Debug)]
@@ -172,7 +174,7 @@ impl Modal {
             Modal::Confirm { .. } | Modal::FriendRequest { .. } => 2,
             Modal::Players { items, .. } => items.len(),
             Modal::Pick { items, .. } => items.len() + 1,
-            Modal::Keyboard(_) => 0,
+            Modal::Keyboard(_) | Modal::PadTest(_) => 0,
         }
     }
 
@@ -189,13 +191,23 @@ impl Modal {
             | Modal::Players { focus, .. }
             | Modal::Pick { focus, .. }
             | Modal::FriendRequest { focus, .. } => Some(focus),
-            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) => None,
+            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) | Modal::PadTest(_) => None,
         }
     }
 
     pub fn handle(&mut self, nav: Nav) -> Action {
         if let Modal::Keyboard(k) = self {
             return k.handle(nav).map_or(Action::None, Action::Text);
+        }
+        // only the keyboard gets here: the pad's buttons are being tested
+        if let Modal::PadTest(t) = self {
+            match nav {
+                Nav::Back => return Action::Close,
+                Nav::Ok => t.start(),
+                Nav::Options | Nav::Add => t.reset(),
+                _ => {}
+            }
+            return Action::None;
         }
         let n = self.item_count();
         if let Some(f) = self.focus_mut() {
@@ -302,6 +314,7 @@ impl Modal {
             Modal::News { .. } => vec![(0, "Открыть в браузере"), (1, "Закрыть")],
             Modal::Trophies { .. } => vec![(1, "Закрыть")],
             Modal::Keyboard(_) => vec![(0, "Клавиша"), (3, "Стереть"), (2, "Пробел"), (1, "Отмена")],
+            Modal::PadTest(_) => vec![],
             _ => vec![(0, "Выбрать"), (1, "Назад")],
         }
     }
@@ -321,6 +334,7 @@ impl Modal {
                 rows(ui, r, s, &labels, *focus, appear);
             }
             Modal::Keyboard(k) => k.paint(ui, screen, s, appear),
+            Modal::PadTest(t) => t.paint(ui, screen, s, appear),
             Modal::Pick { title, items, focus, scroll, max, .. } => {
                 let visible = 7.min(items.len());
                 let r = panel(ui, screen, s, 760.0, title, visible + 1, appear);

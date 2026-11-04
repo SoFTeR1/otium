@@ -56,6 +56,11 @@ impl App {
                     "xbox" => "Xbox",
                     _ => "Автоматически",
                 };
+                let pad = match self.input.snapshot() {
+                    None => "Не подключён",
+                    Some(st) if self.input.calibration(&st.key).is_some() => "Откалиброван",
+                    Some(_) => "Подключён",
+                };
                 let user = s.setting_str("user");
                 (
                     "Настройки".to_string(),
@@ -66,6 +71,7 @@ impl App {
                         item(SetKey::Discord, "Статус в Discord", if s.setting_str("discordId").is_empty() { "Выкл" } else { "Вкл" }),
                         item(SetKey::Sort, "Порядок игр", sort),
                         item(SetKey::Layout, "Кнопки геймпада", layout),
+                        item(SetKey::PadTest, "Геймпад: проверка и калибровка", pad),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
                         item(SetKey::Fullscreen, "Полноэкранный режим", onoff(self.fullscreen)),
@@ -189,6 +195,10 @@ impl App {
                 let next = cycle(&cur, &["recent", "alpha", "custom"]);
                 self.set("sortMode", next);
                 self.refresh(None);
+            }
+            SetKey::PadTest => {
+                self.open(Modal::PadTest(Box::new(crate::padtest::PadTest::new())));
+                return;
             }
             SetKey::Layout => {
                 let next = cycle(self.lib.setting_str("padLayout"), &["auto", "ps", "xbox"]);
@@ -496,5 +506,38 @@ fn power_sleep() {
     // sleep, not hibernate
     unsafe {
         let _ = SetSuspendState(false, false, false);
+    }
+}
+
+impl App {
+    /// One frame of the pad test: feed it the pad, store what it measured.
+    pub(super) fn pad_test_tick(&mut self) {
+        let st = self.input.snapshot();
+        let cal = st.as_ref().and_then(|st| self.input.calibration(&st.key).copied());
+        let Some(Modal::PadTest(t)) = self.modal.as_mut() else { return };
+        let Some(out) = t.tick(st, cal) else { return };
+        match out {
+            crate::padtest::Out::Close => {
+                self.modal = None;
+                return self.open_settings(SetMenu::Main, 0);
+            }
+            crate::padtest::Out::Save(key, axes) => {
+                let mut all = self.lib.settings.get("padCal").cloned().filter(|v| v.is_object()).unwrap_or_else(|| serde_json::json!({}));
+                let axes: Vec<serde_json::Value> = axes.iter().map(|a| a.to_json()).collect();
+                all[key.as_str()] = serde_json::json!({ "axes": axes, "at": super::now_ms() as i64 });
+                self.lib.settings.insert("padCal".into(), all);
+                self.toast("Калибровка сохранена", false);
+                crate::sound::play(crate::sound::Sfx::Ok);
+            }
+            crate::padtest::Out::Reset(key) => {
+                if let Some(all) = self.lib.settings.get_mut("padCal").and_then(|v| v.as_object_mut()) {
+                    all.remove(&key);
+                }
+                self.toast("Калибровка сброшена", false);
+                crate::sound::play(crate::sound::Sfx::Back);
+            }
+        }
+        self.save();
+        self.input.set_cal(self.lib.settings.get("padCal"));
     }
 }
