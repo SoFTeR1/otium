@@ -212,6 +212,27 @@ impl App {
         let (vol, noise) = self.voice_settings();
         self.calls.voice.send(VCmd::Volume(vol / 100.0));
         self.calls.voice.send(VCmd::Noise(noise));
+        self.calls.voice.send(VCmd::Mic(self.mic_setting()));
+    }
+
+    /// `voice.micId`: a device name here; the Electron build stores Chromium ids there, which
+    /// match no name, so they mean "default" (and Electron falls back the same way for ours).
+    fn mic_setting(&self) -> String {
+        self.lib.settings.get("voice").and_then(|v| v["micId"].as_str()).unwrap_or_default().to_string()
+    }
+
+    /// Next microphone in the list ("" = Windows default first).
+    fn cycle_mic(&mut self) {
+        let mut list = vec![String::new()];
+        list.extend(crate::voice::mics());
+        let cur = self.mic_setting();
+        let i = list.iter().position(|m| *m == cur).unwrap_or(0);
+        let next = list[(i + 1) % list.len()].clone();
+        let mut voice = self.lib.settings.get("voice").cloned().unwrap_or_else(|| json!({ "volume": 100, "micId": "", "noise": true }));
+        voice["micId"] = json!(next);
+        self.lib.settings.insert("voice".into(), voice);
+        self.save();
+        self.calls.voice.send(VCmd::Mic(next));
     }
 
     // ---------- 1:1 calls ----------
@@ -840,6 +861,7 @@ impl App {
             SetItem { key: SetKey::CallMute, label: if muted { "Включить микрофон" } else { "Выключить микрофон" }.into(), value: String::new(), danger: false },
             SetItem { key: SetKey::CallDeafen, label: if deafened { "Включить звук" } else { "Выключить звук" }.into(), value: "не слышать собеседников".into(), danger: false },
             SetItem { key: SetKey::CallVolume, label: "Громкость друзей".into(), value: format!("{vol:.0}%  ◀ ▶"), danger: false },
+            SetItem { key: SetKey::CallMic, label: "Микрофон".into(), value: mic_label(&self.mic_setting()), danger: false },
             SetItem { key: SetKey::CallNoise, label: "Шумоподавление".into(), value: if noise { "Вкл" } else { "Выкл" }.into(), danger: false },
         ];
         if self.calls.call.state == CallState::Active {
@@ -860,6 +882,7 @@ impl App {
                 self.set_volume(if v >= 200.0 { 0.0 } else { v + 25.0 });
             }
             SetKey::CallNoise => self.toggle_noise(),
+            SetKey::CallMic => self.cycle_mic(),
             SetKey::CallAdd => {
                 let exclude = vec![self.calls.call.pk.clone()];
                 return self.open_picker("Добавить в звонок", PickFor::AddToCall, &exclude, MAX_GROUP - 2);
@@ -1155,5 +1178,14 @@ impl App {
         let mut scroll = self.social.chat_scroll();
         super::social::paint_messages(p, area, s, &g.history, &me, &mut scroll, &|pk: &str| names.get(pk).cloned().unwrap_or_else(|| "Игрок".into()));
         self.social.set_chat_scroll(scroll);
+    }
+}
+
+/// Shown name of the chosen microphone: Windows names look like "Микрофон (Realtek Audio)".
+fn mic_label(id: &str) -> String {
+    if id.is_empty() || !crate::voice::mics().iter().any(|m| m == id) {
+        "По умолчанию".into()
+    } else {
+        id.to_string()
     }
 }

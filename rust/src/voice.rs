@@ -48,6 +48,8 @@ pub enum Cmd {
     /// friends' volume, 0.0 ..= 2.0
     Volume(f32),
     Noise(bool),
+    /// microphone by name ("" = Windows default); reopens the devices if a call is on
+    Mic(String),
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +96,7 @@ struct Shared {
     /// volume * 1000
     volume: AtomicU32,
     noise: AtomicBool,
+    mic: Mutex<String>,
     /// decoded audio per peer, 48 kHz mono, waiting for the speakers
     play: Mutex<HashMap<String, VecDeque<f32>>>,
     /// recent loudness per peer (and "" for us), for the speaking indicators
@@ -121,6 +124,7 @@ async fn run(mut rx: UnboundedReceiver<Cmd>, send: Send_) {
         deafened: AtomicBool::new(false),
         volume: AtomicU32::new(1000),
         noise: AtomicBool::new(true),
+        mic: Mutex::new(String::new()),
         play: Mutex::new(HashMap::new()),
         level: Mutex::new(HashMap::new()),
     });
@@ -223,6 +227,15 @@ impl Engine {
             }
             Cmd::Volume(v) => self.shared.volume.store((v.clamp(0.0, 2.0) * 1000.0) as u32, Ordering::Relaxed),
             Cmd::Noise(n) => self.shared.noise.store(n, Ordering::Relaxed),
+            Cmd::Mic(name) => {
+                let changed = *self.shared.mic.lock().unwrap() != name;
+                *self.shared.mic.lock().unwrap() = name;
+                if changed && self.audio.is_some() {
+                    // drop the old streams first so the device is free, then open the new one
+                    self.audio = None;
+                    self.ensure_audio();
+                }
+            }
         }
     }
 
@@ -472,7 +485,10 @@ unsafe impl Send for AudioIo {}
 impl AudioIo {
     fn start(shared: Arc<Shared>, peers: Arc<tokio::sync::Mutex<HashMap<String, Peer>>>, rt: tokio::runtime::Handle) -> Result<Self, String> {
         let host = rodio::cpal::default_host();
-        let mic = host.default_input_device().ok_or("Нет микрофона — подключите его и проверьте, что он разрешён в Windows")?;
+        let want = shared.mic.lock().unwrap().clone();
+        // the chosen mic may be unplugged (or be a Chromium device id from the Electron build): use the default then
+        let chosen = if want.is_empty() { None } else { host.input_devices().ok().and_then(|mut d| d.find(|d| d.name().ok().as_deref() == Some(want.as_str()))) };
+        let mic = chosen.or_else(|| host.default_input_device()).ok_or("Нет микрофона — подключите его и проверьте, что он разрешён в Windows")?;
         let spk = host.default_output_device().ok_or("Нет устройства вывода звука")?;
         let in_cfg = mic.default_input_config().map_err(|e| format!("Микрофон недоступен: {e}"))?;
         let out_cfg = spk.default_output_config().map_err(|e| format!("Звук недоступен: {e}"))?;
@@ -515,6 +531,9 @@ impl AudioIo {
         }
         .map_err(|e| format!("Не удалось открыть микрофон: {e}"))?;
 
+        // what the speakers play, 48 kHz in 10 ms chunks: the echo canceller's reference
+        let (render_tx, render_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
+        let out_latency_ms = 30;
         let enc_shared = shared.clone();
         std::thread::Builder::new()
             .name("voice-encode".into())
@@ -522,9 +541,22 @@ impl AudioIo {
                 let Ok(mut enc) = opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip) else { return };
                 let _ = enc.set_inband_fec(true);
                 let mut denoise = nnnoiseless::DenoiseState::new();
+                let mut apm = new_apm();
                 let mut out = vec![0u8; 4000];
                 let mut buf = [0f32; 480];
+                let mut clean = [0f32; 480];
                 while let Ok(mut f) = frames_rx.recv() {
+                    // echo cancellation + automatic gain, like Chromium's echoCancellation/autoGainControl
+                    for half in f.chunks_mut(480) {
+                        while let Ok(r) = render_rx.try_recv() {
+                            let mut sink = [0f32; 480];
+                            let _ = apm.process_render_f32(&[&r], &mut [&mut sink]);
+                        }
+                        let _ = apm.set_stream_delay_ms(out_latency_ms);
+                        if apm.process_capture_f32(&[half], &mut [&mut clean]).is_ok() {
+                            half.copy_from_slice(&clean);
+                        }
+                    }
                     if enc_shared.noise.load(Ordering::Relaxed) {
                         // RNNoise works on 10 ms frames in 16-bit range
                         for half in f.chunks_mut(480) {
@@ -565,6 +597,7 @@ impl AudioIo {
         let play = shared.clone();
         let mut ors = Resampler::new(RATE, out_rate);
         let mut pending: VecDeque<f32> = VecDeque::new();
+        let mut reference: Vec<f32> = Vec::with_capacity(960);
         let mut mix = move |frames: usize| -> Vec<f32> {
             // pull enough 48 kHz audio to produce `frames` device frames
             let need = (frames as f64 * RATE as f64 / out_rate as f64).ceil() as usize + 4;
@@ -585,6 +618,10 @@ impl AudioIo {
             }
             if deaf {
                 src.iter_mut().for_each(|v| *v = 0.0);
+            }
+            reference.extend(src.iter().map(|v| (v * vol).clamp(-1.0, 1.0)));
+            while reference.len() >= 480 {
+                let _ = render_tx.try_send(reference.drain(..480).collect());
             }
             let mut res = Vec::with_capacity(frames + 8);
             ors.push(&src, &mut res);
@@ -621,6 +658,29 @@ impl AudioIo {
         output.play().map_err(|e| e.to_string())?;
         Ok(Self { _input: input, _output: output })
     }
+}
+
+/// WebRTC audio processing (pure Rust port): AEC3 against what we play, a high-pass filter and
+/// adaptive gain. Noise is left to RNNoise, which the user can switch off.
+fn new_apm() -> sonora::AudioProcessing {
+    use sonora::config::{AdaptiveDigital, EchoCanceller, GainController2, HighPassFilter};
+    let config = sonora::Config {
+        echo_canceller: Some(EchoCanceller::default()),
+        high_pass_filter: Some(HighPassFilter::default()),
+        gain_controller2: Some(GainController2 { adaptive_digital: Some(AdaptiveDigital::default()), ..Default::default() }),
+        ..Default::default()
+    };
+    sonora::AudioProcessing::builder()
+        .config(config)
+        .capture_config(sonora::StreamConfig::new(RATE, 1))
+        .render_config(sonora::StreamConfig::new(RATE, 1))
+        .build()
+}
+
+/// Names of the microphones Windows knows about, for the picker.
+pub fn mics() -> Vec<String> {
+    let host = rodio::cpal::default_host();
+    host.input_devices().map(|d| d.filter_map(|d| d.name().ok()).collect()).unwrap_or_default()
 }
 
 /// Linear resampler, good enough for voice.
@@ -683,6 +743,39 @@ mod tests {
         assert_eq!(o2, vec![1.0, 2.0]);
     }
 
+    /// The microphone hears the speakers 40 ms late and quieter: after a few seconds the echo
+    /// canceller has to remove most of it.
+    #[test]
+    fn cancels_echo() {
+        let mut apm = new_apm();
+        // speech-like far end: noise bursts with a changing envelope
+        let mut seed = 1u32;
+        let mut noise = move || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        };
+        let total = RATE as usize * 8;
+        let far: Vec<f32> = (0..total).map(|i| noise() * 0.3 * (0.5 + 0.5 * (i as f32 / 4800.0).sin().abs())).collect();
+        let delay = RATE as usize * 40 / 1000;
+        let (mut in_e, mut out_e) = (0f64, 0f64);
+        let mut clean = [0f32; 480];
+        for (k, r) in far.chunks(480).enumerate() {
+            let mut sink = [0f32; 480];
+            apm.process_render_f32(&[r], &mut [&mut sink]).unwrap();
+            let start = k * 480;
+            let mic: Vec<f32> = (start..start + 480).map(|i| if i >= delay { far[i - delay] * 0.5 } else { 0.0 }).collect();
+            let _ = apm.set_stream_delay_ms(30);
+            apm.process_capture_f32(&[&mic], &mut [&mut clean]).unwrap();
+            if start > RATE as usize * 4 {
+                in_e += mic.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+                out_e += clean.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+            }
+        }
+        let db = 10.0 * (out_e / in_e).log10();
+        println!("echo suppressed by {:.1} dB", -db);
+        assert!(db < -20.0, "only {db:.1} dB");
+    }
+
     #[test]
     fn opus_round_trip() {
         let mut enc = opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip).unwrap();
@@ -693,6 +786,44 @@ mod tests {
         let mut pcm = vec![0f32; 5760];
         let m = dec.decode_float(&pkt[..n], &mut pcm, false).unwrap();
         assert_eq!(m, FRAME);
+    }
+}
+
+/// Opens the real microphones and speakers (silence goes out) and checks that audio flows
+/// through the echo canceller into the encoder. `cargo test -- --ignored real_mics`
+#[cfg(test)]
+mod devices {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn real_mics() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut names = vec![String::new()];
+        names.extend(mics());
+        println!("{} microphones", names.len() - 1);
+        for name in names {
+            let shared = Arc::new(Shared {
+                muted: AtomicBool::new(false),
+                deafened: AtomicBool::new(false),
+                volume: AtomicU32::new(1000),
+                noise: AtomicBool::new(true),
+                mic: Mutex::new(name.clone()),
+                play: Mutex::new(HashMap::new()),
+                level: Mutex::new(HashMap::new()),
+            });
+            let io = AudioIo::start(shared.clone(), Default::default(), rt.handle().clone());
+            let shown = if name.is_empty() { "default".to_string() } else { name };
+            match io {
+                Ok(io) => {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    let got = shared.level.lock().unwrap().contains_key("");
+                    println!("{shown}: {}", if got { "audio flows" } else { "NO AUDIO" });
+                    drop(io);
+                }
+                Err(e) => println!("{shown}: {e}"),
+            }
+        }
     }
 }
 

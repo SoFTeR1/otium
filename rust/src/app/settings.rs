@@ -228,6 +228,7 @@ impl App {
             | SetKey::CallDeafen
             | SetKey::CallVolume
             | SetKey::CallNoise
+            | SetKey::CallMic
             | SetKey::CallAdd
             | SetKey::CallHangup
             | SetKey::GroupVoice

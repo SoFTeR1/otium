@@ -77,6 +77,7 @@ pub enum SetKey {
     CallDeafen,
     CallVolume,
     CallNoise,
+    CallMic,
     CallAdd,
     CallHangup,
     GroupVoice,
