@@ -17,11 +17,16 @@ const ICON = {
 const st = { focused: true, call: null, speakingMap: {}, toasts: [] };
 
 // ---------- click-through except over buttons ----------
-let interactive = false;
-document.addEventListener('mousemove', (e) => {
-  const over = !!e.target.closest('button');
-  if (over !== interactive) { interactive = over; window.overlay.interactive(over); }
-});
+// Windows doesn't reliably forward mouse moves to a click-through window, so instead we tell the main
+// process where our clickable areas are; it watches the cursor and switches click-through off over them.
+function reportRegions() {
+  const rects = [...document.querySelectorAll('#voice.show .vwrap, #incoming.show button')].map((b) => {
+    const r = b.getBoundingClientRect();
+    return { x: r.left - 6, y: r.top - 6, w: r.width + 12, h: r.height + 40 };
+  });
+  window.overlay.regions(rects);
+}
+setInterval(reportRegions, 500);
 
 function syncVisible() {
   const c = st.call;
@@ -59,6 +64,7 @@ function renderCall() {
   }
   document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => window.overlay.action(b.dataset.a)));
   syncVisible();
+  setTimeout(reportRegions, 450); // after the slide-in transition
 }
 
 function timer(start) {

@@ -164,6 +164,25 @@ ipcMain.on('overlay:action', (_e, a) => {
   send('overlay:action', a);
 });
 ipcMain.on('overlay:interactive', (_e, on) => overlay?.setIgnoreMouseEvents(!on, { forward: true }));
+// clickable areas of the overlay (in overlay coordinates); the cursor is polled against them
+let overlayRegions = [];
+let overlayClickable = false;
+ipcMain.on('overlay:regions', (_e, rects) => (overlayRegions = Array.isArray(rects) ? rects : []));
+setInterval(() => {
+  if (!overlay || overlay.isDestroyed() || !overlay.isVisible() || !overlayRegions.length) {
+    if (overlayClickable && overlay && !overlay.isDestroyed()) { overlayClickable = false; overlay.setIgnoreMouseEvents(true, { forward: true }); }
+    return;
+  }
+  const p = screen.getCursorScreenPoint();
+  const b = overlay.getBounds();
+  const x = p.x - b.x;
+  const y = p.y - b.y;
+  const inside = overlayRegions.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+  if (inside !== overlayClickable) {
+    overlayClickable = inside;
+    overlay.setIgnoreMouseEvents(!inside, { forward: true });
+  }
+}, 80);
 // only show the window while it has something on it, so it never sits over a game for nothing
 ipcMain.on('overlay:visible', (_e, on) => {
   if (!overlay) return;

@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('overlay', {
   action: (a) => ipcRenderer.send('overlay:action', a),
   // the overlay is click-through except over its buttons
   interactive: (on) => ipcRenderer.send('overlay:interactive', on),
+  regions: (rects) => ipcRenderer.send('overlay:regions', rects),
   visible: (on) => ipcRenderer.send('overlay:visible', on)
 });
