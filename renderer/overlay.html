@@ -35,8 +35,9 @@
     .ib.hang:hover { background: #f05252; }
 
     /* ---- voice widget (top left, translucent, like the Discord overlay) ---- */
-    #voice { position: fixed; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 6px; opacity: 0; transform: translateX(-12px); transition: opacity 0.3s, transform 0.35s var(--ease); }
-    #voice.show { opacity: 0.92; transform: none; }
+    /* middle of the left edge */
+    #voice { position: fixed; top: 50%; left: 16px; display: flex; flex-direction: column; gap: 6px; opacity: 0; transform: translate(-12px, -50%); transition: opacity 0.3s, transform 0.35s var(--ease); }
+    #voice.show { opacity: 0.92; transform: translate(0, -50%); }
     .vwrap { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: -8px; border-radius: 12px; text-align: left; transition: background 0.2s, box-shadow 0.2s; }
     #voice:hover { opacity: 1; }
     .vwrap:hover { background: rgba(17, 19, 24, 0.72); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
