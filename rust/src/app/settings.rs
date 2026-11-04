@@ -243,6 +243,7 @@ impl App {
             | SetKey::CallVolume
             | SetKey::CallNoise
             | SetKey::CallMic
+            | SetKey::CallVad
             | SetKey::CallAdd
             | SetKey::CallHangup
             | SetKey::GroupVoice

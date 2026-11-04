@@ -80,6 +80,7 @@ pub enum SetKey {
     CallVolume,
     CallNoise,
     CallMic,
+    CallVad,
     CallAdd,
     CallHangup,
     GroupVoice,

@@ -115,6 +115,7 @@ impl App {
             self.publish_presence();
             self.publish_library();
         }
+        self.tick_call_menu(ctx);
         let Some(l) = self.launching.as_mut() else { return };
         let now = Instant::now();
         let age = now - l.phase_at;

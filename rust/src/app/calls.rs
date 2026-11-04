@@ -213,6 +213,52 @@ impl App {
         self.calls.voice.send(VCmd::Volume(vol / 100.0));
         self.calls.voice.send(VCmd::Noise(noise));
         self.calls.voice.send(VCmd::Mic(self.mic_setting()));
+        self.calls.voice.send(VCmd::Gate(self.vad_setting().0.then_some(self.vad_setting().1)));
+    }
+
+    /// Voice activation (Rust build only): `voice.vad` on/off and `voice.vadDb`, the threshold.
+    fn vad_setting(&self) -> (bool, f32) {
+        let v = self.lib.settings.get("voice");
+        let on = v.and_then(|v| v["vad"].as_bool()).unwrap_or(false);
+        let db = v.and_then(|v| v["vadDb"].as_f64()).unwrap_or(VAD_DEFAULT_DB as f64) as f32;
+        (on, db.clamp(VAD_MIN_DB, VAD_MAX_DB))
+    }
+
+    fn set_vad(&mut self, on: bool, db: f32) {
+        let db = db.clamp(VAD_MIN_DB, VAD_MAX_DB);
+        let mut voice = self.lib.settings.get("voice").cloned().unwrap_or_else(|| json!({ "volume": 100, "micId": "", "noise": true }));
+        voice["vad"] = json!(on);
+        voice["vadDb"] = json!(db as i64);
+        self.lib.settings.insert("voice".into(), voice);
+        self.save();
+        self.calls.voice.send(VCmd::Gate(on.then_some(db)));
+    }
+
+    /// The voice activation row: threshold and how loud the mic is right now, so the user can
+    /// set the threshold between their background and their voice.
+    fn vad_label(&self) -> String {
+        let (on, db) = self.vad_setting();
+        let now = self.calls.voice.mic_db();
+        let now = if now > -99.0 { format!(" · сейчас {}", fmt_db(now)) } else { String::new() };
+        if on {
+            format!("порог {} ◀ ▶{now}", fmt_db(db))
+        } else {
+            format!("Выкл{now}")
+        }
+    }
+
+    /// Keeps the live mic level on the voice activation row fresh while the call menu is open.
+    pub(super) fn tick_call_menu(&mut self, ctx: &egui::Context) {
+        if !matches!(&self.modal, Some(Modal::Settings { menu: SetMenu::Call, .. })) {
+            return;
+        }
+        let label = self.vad_label();
+        if let Some(Modal::Settings { items, .. }) = &mut self.modal {
+            if let Some(i) = items.iter_mut().find(|i| i.key == SetKey::CallVad) {
+                i.value = label;
+            }
+        }
+        ctx.request_repaint_after(Duration::from_millis(100));
     }
 
     /// `voice.micId`: a device name here; the Electron build stores Chromium ids there, which
@@ -863,6 +909,7 @@ impl App {
             SetItem { key: SetKey::CallVolume, label: "Громкость друзей".into(), value: format!("{vol:.0}%  ◀ ▶"), danger: false },
             SetItem { key: SetKey::CallMic, label: "Микрофон".into(), value: mic_label(&self.mic_setting()), danger: false },
             SetItem { key: SetKey::CallNoise, label: "Шумоподавление".into(), value: if noise { "Вкл" } else { "Выкл" }.into(), danger: false },
+            SetItem { key: SetKey::CallVad, label: "Активация по голосу".into(), value: self.vad_label(), danger: false },
         ];
         if self.calls.call.state == CallState::Active {
             items.push(SetItem { key: SetKey::CallAdd, label: "Добавить друга в звонок".into(), value: "станет группой".into(), danger: false });
@@ -883,6 +930,10 @@ impl App {
             }
             SetKey::CallNoise => self.toggle_noise(),
             SetKey::CallMic => self.cycle_mic(),
+            SetKey::CallVad => {
+                let (on, db) = self.vad_setting();
+                self.set_vad(!on, db);
+            }
             SetKey::CallAdd => {
                 let exclude = vec![self.calls.call.pk.clone()];
                 return self.open_picker("Добавить в звонок", PickFor::AddToCall, &exclude, MAX_GROUP - 2);
@@ -904,12 +955,20 @@ impl App {
     /// ◀ ▶ on the volume row.
     pub(super) fn call_menu_side(&mut self, nav: Nav) -> bool {
         let Some(Modal::Settings { menu: SetMenu::Call, items, focus, .. }) = &self.modal else { return false };
-        if items.get(*focus).map(|i| i.key) != Some(SetKey::CallVolume) || !matches!(nav, Nav::Left | Nav::Right) {
+        let key = items.get(*focus).map(|i| i.key);
+        if !matches!(key, Some(SetKey::CallVolume | SetKey::CallVad)) || !matches!(nav, Nav::Left | Nav::Right) {
             return false;
         }
         let f = *focus;
-        let (v, _) = self.voice_settings();
-        self.set_volume(v + if nav == Nav::Right { 10.0 } else { -10.0 });
+        let step = if nav == Nav::Right { 1.0 } else { -1.0 };
+        if key == Some(SetKey::CallVad) {
+            // ◀ ▶ also switches it on: moving the threshold means you want it
+            let (_, db) = self.vad_setting();
+            self.set_vad(true, db + step * 5.0);
+        } else {
+            let (v, _) = self.voice_settings();
+            self.set_volume(v + step * 10.0);
+        }
         self.open_call_menu(f);
         true
     }
@@ -1179,6 +1238,14 @@ impl App {
         super::social::paint_messages(p, area, s, &g.history, &me, &mut scroll, &|pk: &str| names.get(pk).cloned().unwrap_or_else(|| "Игрок".into()));
         self.social.set_chat_scroll(scroll);
     }
+}
+
+const VAD_DEFAULT_DB: f32 = -45.0;
+const VAD_MIN_DB: f32 = -80.0;
+const VAD_MAX_DB: f32 = -10.0;
+
+fn fmt_db(db: f32) -> String {
+    format!("{} дБ", (db.round() as i32).to_string().replace('-', "−"))
 }
 
 /// Shown name of the chosen microphone: Windows names look like "Микрофон (Realtek Audio)".
