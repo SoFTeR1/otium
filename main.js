@@ -324,6 +324,25 @@ function processesUnder({ dir, exe }) {
       (err, out) => resolve(err ? [] : out.split(/\s+/).map(Number).filter((n) => n > 0)));
   });
 }
+// Folder of an exe game, only when it's the game's own (not a drive root, System32 or Program Files itself)
+function gameDir(exe) {
+  const dir = path.dirname(path.normalize(exe));
+  const norm = (d) => d.toLowerCase().replace(/[\\/]+$/, '');
+  const low = norm(dir);
+  const sysRoot = norm(process.env.SystemRoot || 'C:\\Windows');
+  const shared = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432].filter(Boolean).map(norm);
+  if (/^[a-z]:$/.test(low) || low === sysRoot || low.startsWith(sysRoot + '\\') || shared.includes(low)) return null;
+  return dir;
+}
+// Process that owns a window
+function windowPid(hwnd) {
+  return new Promise((resolve) => {
+    const script = `Add-Type -Name W -Namespace P -MemberDefinition '[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);'; $p = [uint32]0; [void][P.W]::GetWindowThreadProcessId([IntPtr][long]$env:PS5L_HWND, [ref]$p); $p`;
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, env: { ...process.env, PS5L_HWND: String(hwnd) } },
+      (err, out) => resolve(err ? 0 : Number(String(out).trim()) || 0));
+  });
+}
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const taskkill = (pid, force) => new Promise((r) => execFile('taskkill', ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])], { windowsHide: true }, () => r()));
 
@@ -335,16 +354,34 @@ ipcMain.handle('game:close', async (_e, game) => {
     const dir = await steam.installDir(sid);
     if (dir) (await processesUnder({ dir })).forEach((p) => pids.add(p));
   } else if (/\.exe$/i.test(game.path || '')) {
-    (await processesUnder({ exe: path.normalize(game.path.replace(/^"|"$/g, '')) })).forEach((p) => pids.add(p));
+    const exe = path.normalize(game.path.trim().replace(/^"|"$/g, ''));
+    (await processesUnder({ exe, dir: gameDir(exe) })).forEach((p) => pids.add(p));
   }
   if (!pids.size) return { ok: false, error: 'Не нашёл процесс игры' };
+  return killAll(pids);
+});
+
+// Close the game whose window the launcher was summoned over (any game, even one started elsewhere)
+ipcMain.handle('game:closeFront', async () => {
+  if (!gameHwnd) return { ok: false, error: 'Не нашёл окно игры' };
+  const pid = await windowPid(gameHwnd);
+  if (!pid || pid === process.pid) return { ok: false, error: 'Не нашёл процесс игры' };
+  const r = await killAll(new Set([pid]));
+  gameEnded();
+  return r;
+});
+
+async function killAll(pids) {
   // ask nicely first (like the window's close button), then force whatever is still running
   for (const pid of pids) await taskkill(pid, false);
   for (let i = 0; i < 10 && [...pids].some(pidAlive); i++) await new Promise((r) => setTimeout(r, 500));
   const stubborn = [...pids].filter(pidAlive);
   for (const pid of stubborn) await taskkill(pid, true);
   return { ok: true, count: pids.size, forced: stubborn.length > 0 };
-});
+}
+
+// exe games we started that still have processes alive
+ipcMain.handle('game:running', () => [...gamePids.keys()]);
 
 ipcMain.handle('game:launch', async (_e, game) => {
   const target = (game.path || '').trim().replace(/^"|"$/g, '');
@@ -367,7 +404,11 @@ ipcMain.handle('game:launch', async (_e, game) => {
     child.once('spawn', () => {
       child.unref();
       gamePids.set(game.id, child.pid);
-      child.once('exit', () => {
+      child.once('exit', async () => {
+        // a launcher-style exe may hand off to other processes of the game: wait until its folder is quiet
+        const dir = gameDir(target);
+        while (dir && (await processesUnder({ dir })).length) await new Promise((r) => setTimeout(r, 3000));
+        if (gamePids.get(game.id) !== child.pid) return; // started again meanwhile
         gamePids.delete(game.id);
         send('game:exited', { id: game.id, start: started, end: Date.now() });
         gameEnded();

@@ -177,7 +177,11 @@ function renderCC() {
     items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
     items.push({ cls: 'ctl hangup', html: `${CC_ICONS.stop}<div class="d">Закрыть</div>`, ok: () => { closeCC(); confirmCloseGame(g); } });
   }
-  else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
+  else if (cc.canReturn) {
+    items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
+    // a game the launcher doesn't know about (started elsewhere): close whatever window we were summoned over
+    items.push({ cls: 'ctl hangup', html: `${CC_ICONS.stop}<div class="d">Закрыть игру</div>`, ok: () => { closeCC(); confirmCloseFront(); } });
+  }
   if (room.gid) {
     const g = groupById(room.gid);
     const ic = (s) => s.replace('<svg', '<svg class="ci"');
@@ -329,8 +333,9 @@ const CC_ICONS = {
 };
 
 // Guide / View+Start from the background watcher
-ipc.onGuide(({ from, canReturn }) => {
+ipc.onGuide(async ({ from, canReturn }) => {
   cc.canReturn = !!canReturn;
+  await syncRunning();
   if (osk.open) closeOSK(false);
   if (from === 'front' && cc.open) {
     // second press while a game runs = back to the game, like the PS button

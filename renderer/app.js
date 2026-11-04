@@ -298,6 +298,15 @@ function syncIdle() {
 document.addEventListener('visibilitychange', syncIdle);
 window.addEventListener('blur', () => setTimeout(syncIdle, 300));
 window.addEventListener('focus', syncIdle);
+// exe games the launcher started and that are still alive (also catches state lost along the way)
+async function syncRunning() {
+  const ids = (await ipc.gameRunning?.().catch(() => null)) || [];
+  const fresh = ids.filter((id) => !running.has(id) && data.games.some((g) => g.id === id));
+  if (!fresh.length) return;
+  fresh.forEach((id) => running.add(id));
+  render(list[sel]?.id);
+}
+window.addEventListener('focus', syncRunning);
 
 // ---------- Rendering ----------
 const SORT_NAMES = { recent: 'Недавние', alpha: 'По алфавиту', custom: 'Свой порядок' };
@@ -527,10 +536,25 @@ function confirmCloseGame(g) {
     const r = await ipc.closeGame(g);
     if (!r?.ok) return toast(r?.error || 'Не получилось закрыть игру', true, { title: g.name });
     // exe games report their exit themselves; Steam updates its running-app flag within a few seconds
-    setTimeout(() => {
-      if (running.has(g.id) && !steamIdOf(g)) { running.delete(g.id); render(g.id); }
+    setTimeout(async () => {
+      if (running.has(g.id) && !steamIdOf(g) && !(await ipc.gameRunning?.())?.includes(g.id)) { running.delete(g.id); render(g.id); }
     }, 1500);
     toast(r.forced ? 'Игра не отвечала и была завершена принудительно' : 'Игра закрыта', false, { title: g.name, icon: '✅' });
+  };
+}
+
+// Close the game the launcher was summoned over when it isn't one we're tracking
+function confirmCloseFront() {
+  openModal(`<h2>Закрыть игру?</h2>
+    <div class="meta"><span>Будет закрыто окно, поверх которого открыт лаунчер. Если игра не ответит за 5 секунд — она будет завершена. Несохранённый прогресс может потеряться.</span></div>
+    <div class="buttons"><button class="btn focusable" id="cgNo">Отмена</button><button class="btn danger focusable" id="cgYes">Закрыть игру</button></div>`, { focus: 0 });
+  $('#cgNo').onclick = closeModal;
+  $('#cgYes').onclick = async () => {
+    closeModal();
+    const r = await ipc.closeFrontGame();
+    if (!r?.ok) return toast(r?.error || 'Не получилось закрыть игру', true, { title: 'Игра' });
+    cc.canReturn = false;
+    toast(r.forced ? 'Игра не отвечала и была завершена принудительно' : 'Игра закрыта', false, { title: 'Игра', icon: '✅' });
   };
 }
 
@@ -591,6 +615,7 @@ async function launch(g) {
   const cancelled = new Promise((r) => (cancel = r));
   launching = { cancel: () => cancel('cancel') };
 
+  exitedEarly.delete(g.id);
   const [res] = await Promise.all([ipc.launch(g), sleep(1500)]);
   if (!res.ok) {
     sfx.err();
@@ -671,7 +696,8 @@ function addSession(g, start, end) {
 
 ipc.onGameExited(async ({ id, start, end }) => {
   const g = data.games.find((x) => x.id === id);
-  if (!running.delete(id)) exitedEarly.add(id);
+  // only matters while the launch splash is still up; otherwise a later launch would never count as running
+  if (!running.delete(id) && busy) exitedEarly.add(id);
   if (!g) return;
   addSession(g, start, end);
   await save();
