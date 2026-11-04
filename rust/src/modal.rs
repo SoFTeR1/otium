@@ -12,7 +12,7 @@ pub enum Modal {
     Import { list: Vec<SteamGame>, picked: HashSet<String>, focus: usize, scroll: f32 },
     Options { focus: usize, game: String, items: Vec<(Opt, String)> },
     /// the Guide-button menu over a running game
-    Control { focus: usize, items: Vec<(CtlAction, &'static str)> },
+    Control { focus: usize, scroll: f32, mixer: Option<Box<crate::app::MixerPanel>> },
     ConfirmDelete { focus: usize, game: String },
     Message { title: String, text: String },
     News { news: crate::steam_api::News, game: String, fallback: Vec<String>, scroll: f32 },
@@ -35,6 +35,7 @@ pub enum SetMenu {
     Account,
     Discord,
     Power,
+    Timer,
     Profile,
     Friend,
     Call,
@@ -65,6 +66,14 @@ pub enum SetKey {
     DiscordTimer,
     DiscordState,
     Sleep,
+    TimerOpen,
+    Timer30,
+    Timer60,
+    Timer90,
+    Timer120,
+    TimerCustom,
+    TimerAction,
+    TimerCancel,
     Restart,
     Shutdown,
     Quit,
@@ -122,21 +131,9 @@ pub enum Opt {
     Delete,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum CtlAction {
-    ReturnToGame,
-    CloseGame,
-    Home,
-    Settings,
-    Power,
-    Social,
-    CallMenu,
-    AcceptCall,
-}
 
 pub enum Action {
     None,
-    Control(CtlAction),
     Close,
     PickFile,
     OpenImport,
@@ -166,7 +163,7 @@ impl Modal {
         match self {
             Modal::Add { .. } => ADD_ITEMS.len(),
             Modal::Options { items, .. } => items.len(),
-            Modal::Control { items, .. } => items.len(),
+            Modal::Control { .. } => 0,
             Modal::ConfirmDelete { .. } => CONFIRM_ITEMS.len(),
             Modal::Import { list, .. } => list.len() + 1,
             Modal::Message { .. } | Modal::News { .. } => 1,
@@ -185,14 +182,13 @@ impl Modal {
             | Modal::Options { focus, .. }
             | Modal::ConfirmDelete { focus, .. }
             | Modal::Import { focus, .. }
-            | Modal::Control { focus, .. }
             | Modal::Trophies { focus, .. }
             | Modal::Settings { focus, .. }
             | Modal::Confirm { focus, .. }
             | Modal::Players { focus, .. }
             | Modal::Pick { focus, .. }
             | Modal::FriendRequest { focus, .. } => Some(focus),
-            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) | Modal::PadTest(_) => None,
+            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) | Modal::PadTest(_) | Modal::Control { .. } => None,
         }
     }
 
@@ -246,7 +242,6 @@ impl Modal {
                 0 => Action::OpenImport,
                 _ => Action::PickFile,
             },
-            Modal::Control { focus, items } if nav == Nav::Ok => Action::Control(items[*focus].0),
             Modal::Settings { menu, items, focus, .. } if nav == Nav::Ok => Action::Setting(*menu, items[*focus].key, *focus),
             Modal::Players { items, focus, .. } if nav == Nav::Ok => {
                 let (pk, name, _) = items[*focus].clone();
@@ -316,11 +311,17 @@ impl Modal {
             Modal::Trophies { .. } => vec![(1, "Закрыть")],
             Modal::Keyboard(_) => vec![(0, "Клавиша"), (3, "Стереть"), (2, "Пробел"), (1, "Отмена")],
             Modal::PadTest(_) => vec![],
+            Modal::Control { mixer: Some(_), .. } => vec![(0, "Выкл. звук"), (1, "Назад")],
+            Modal::Control { .. } => vec![(0, "Выбрать"), (1, "Закрыть")],
             _ => vec![(0, "Выбрать"), (1, "Назад")],
         }
     }
 
     pub fn paint(&mut self, ui: &egui::Ui, screen: Rect, s: f32, dt: f32, appear: f32) {
+        if matches!(self, Modal::Control { .. }) {
+            // painted by the app: it needs the game, the call and the music
+            return;
+        }
         let p = ui.painter();
         p.rect_filled(screen, 0.0, black(0.62 * appear));
 
@@ -435,11 +436,7 @@ impl Modal {
                     clip.text(pos2(row.right() - 20.0 * s, row.center().y), Align2::RIGHT_CENTER, &it.value, font(19.0 * s), fg.gamma_multiply(0.65));
                 }
             }
-            Modal::Control { focus, items } => {
-                let labels: Vec<&str> = items.iter().map(|(_, l)| *l).collect();
-                let r = panel(ui, screen, s, 620.0, "Центр управления", labels.len(), appear);
-                rows(ui, r, s, &labels, *focus, appear);
-            }
+            Modal::Control { .. } => {}
             Modal::ConfirmDelete { focus, game } => {
                 let r = panel(ui, screen, s, 620.0, &format!("Удалить «{game}»?"), CONFIRM_ITEMS.len() + 1, appear);
                 let p = ui.painter();

@@ -133,7 +133,7 @@ fn short_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-fn mmss(d: Duration) -> String {
+pub(super) fn mmss(d: Duration) -> String {
     let s = d.as_secs();
     if s >= 3600 {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
@@ -143,7 +143,7 @@ fn mmss(d: Duration) -> String {
 }
 
 impl App {
-    fn me_pk(&self) -> String {
+    pub(super) fn me_pk(&self) -> String {
         self.social.me_pk().unwrap_or_default()
     }
 
@@ -856,7 +856,7 @@ impl App {
         }
     }
 
-    fn stop_group_ring(&mut self) {
+    pub(super) fn stop_group_ring(&mut self) {
         if self.calls.ring.take().is_some() && self.calls.call.state == CallState::Idle {
             self.calls.ring_sound_at = None;
         }

@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 mod calls;
+mod control;
+pub use control::MixerPanel;
 mod edit;
 mod pages;
 mod run;
@@ -64,6 +66,7 @@ pub struct App {
     toast: Option<Toast>,
     overlay: crate::overlay::Overlay,
     overlay_demo_toasts: u32,
+    timer: control::SleepTimer,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
@@ -164,6 +167,7 @@ impl App {
             toast: None,
             overlay: Default::default(),
             overlay_demo_toasts: 0,
+            timer: Default::default(),
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
@@ -298,6 +302,9 @@ impl App {
         if self.call_menu_side(nav) {
             return;
         }
+        if matches!(self.modal, Some(Modal::Control { .. })) {
+            return self.control_nav(nav);
+        }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
             self.apply(action, frame);
@@ -362,10 +369,6 @@ impl App {
             Action::RequestFriend(pk, name) => self.request_friend(pk, name),
             Action::Picked(purpose, pks) => self.picked(purpose, pks),
             Action::AnswerRequest(pk, yes) => self.answer_request(pk, yes),
-            Action::Control(c) => {
-                self.modal = None;
-                self.control(c);
-            }
             Action::Delete => {
                 self.modal = None;
                 self.delete_selected();
@@ -603,6 +606,7 @@ impl eframe::App for App {
             self.on_event(e);
         }
         self.tick(ctx);
+        self.tick_timer();
         self.tick_pages();
         self.social_tick();
         self.calls_tick();
@@ -775,6 +779,9 @@ impl App {
         if let Some(m) = self.modal.as_mut() {
             let a = ease_out((self.modal_at.elapsed().as_secs_f32() / 0.18).min(1.0));
             m.paint(ui, rect, s, dt, a);
+            if matches!(m, Modal::Control { .. }) {
+                self.paint_control(ui, rect, s, dt, a);
+            }
         }
         self.paint_toast(ui, rect, s);
     }

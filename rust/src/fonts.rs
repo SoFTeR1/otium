@@ -21,6 +21,8 @@ pub fn install(ctx: &egui::Context) {
     let bold = load("segoe-bold", "segoeuib.ttf");
     let symbol = load("segoe-symbol", "seguisym.ttf");
     let emoji = load("segoe-emoji", "seguiemj.ttf");
+    // Windows' own icon font (Windows 11, then Windows 10) for the Control Center tiles
+    let icons = load("segoe-icons", "SegoeIcons.ttf") || load("segoe-icons", "segmdl2.ttf");
 
     let mut fallbacks: Vec<String> = Vec::new();
     if symbol {
@@ -41,5 +43,8 @@ pub fn install(ctx: &egui::Context) {
     fonts.families.insert(FontFamily::Proportional, family(reg));
     fonts.families.insert(FontFamily::Name("semibold".into()), family(if semi { Some("segoe-semibold") } else { reg }));
     fonts.families.insert(FontFamily::Name("bold".into()), family(if bold { Some("segoe-bold") } else { reg }));
+    let mut ic: Vec<String> = if icons { vec!["segoe-icons".into()] } else { Vec::new() };
+    ic.extend(family(reg));
+    fonts.families.insert(FontFamily::Name("icons".into()), ic);
     ctx.set_fonts(fonts);
 }

@@ -21,6 +21,7 @@ pub enum Target {
     GameName,
     GamePath,
     GameArgs,
+    Timer,
 }
 
 impl Target {

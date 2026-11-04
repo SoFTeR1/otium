@@ -5,7 +5,7 @@ use super::{ease_out, App};
 use crate::data::Game;
 use crate::draw::{self, bold, font, semibold, white};
 use crate::input::PadKind;
-use crate::modal::{CtlAction, Modal};
+use crate::modal::Modal;
 use crate::watch::{self, Event};
 use crate::win;
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect};
@@ -339,7 +339,7 @@ impl App {
 
     // ---------- Guide button / Control Center ----------
 
-    fn has_game(&self) -> bool {
+    pub(super) fn has_game(&self) -> bool {
         !self.running.is_empty() || win::is_window(self.game_hwnd)
     }
 
@@ -354,38 +354,6 @@ impl App {
             return;
         }
         self.open_control();
-    }
-
-    pub(super) fn open_control(&mut self) {
-        let mut items = Vec::new();
-        if self.calls.call.state == crate::app::calls::CallState::Incoming {
-            items.push((CtlAction::AcceptCall, "Принять звонок"));
-        }
-        if self.calls.call.state == crate::app::calls::CallState::Active || self.calls.room.is_some() {
-            items.push((CtlAction::CallMenu, "Звонок: микрофон, звук, завершить"));
-        }
-        if self.has_game() {
-            items.push((CtlAction::ReturnToGame, "Вернуться в игру"));
-            items.push((CtlAction::CloseGame, "Закрыть игру"));
-        }
-        items.push((CtlAction::Home, "Главный экран"));
-        items.push((CtlAction::Social, "Друзья и сообщения"));
-        items.push((CtlAction::Settings, "Настройки"));
-        items.push((CtlAction::Power, "Питание"));
-        self.open(Modal::Control { focus: 0, items });
-    }
-
-    pub(super) fn control(&mut self, c: CtlAction) {
-        match c {
-            CtlAction::ReturnToGame => self.back_to_game(),
-            CtlAction::CloseGame => self.close_game(None),
-            CtlAction::Home => self.social.open = false,
-            CtlAction::Social => self.open_social(),
-            CtlAction::CallMenu => self.open_call_menu(0),
-            CtlAction::AcceptCall => self.accept_call(),
-            CtlAction::Settings => self.open_settings(crate::modal::SetMenu::Main, 0),
-            CtlAction::Power => self.open_settings(crate::modal::SetMenu::Power, 0),
-        }
     }
 
     pub(super) fn back_to_game(&mut self) {

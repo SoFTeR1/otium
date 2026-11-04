@@ -16,6 +16,7 @@ mod modal;
 mod sound;
 mod steam;
 mod media;
+mod mixer;
 mod steam_api;
 mod thumbs;
 mod tray;

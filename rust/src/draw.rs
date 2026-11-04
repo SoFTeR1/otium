@@ -146,6 +146,36 @@ pub fn pad_glyph(p: &Painter, center: Pos2, r: f32, label: &str, color: Color32)
     p.text(center + vec2(0.0, -r * 0.05), egui::Align2::CENTER_CENTER, label, bold(r * 1.15), color);
 }
 
+/// Segoe Fluent Icons / MDL2 glyphs, see `ic`.
+pub fn icon(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("icons".into()))
+}
+
+/// Code points in Windows' icon font.
+pub mod ic {
+    pub const HOME: &str = "\u{E80F}";
+    pub const VOLUME: &str = "\u{E767}";
+    pub const MUTE: &str = "\u{E74F}";
+    pub const SETTINGS: &str = "\u{E713}";
+    pub const POWER: &str = "\u{E7E8}";
+    pub const CHAT: &str = "\u{E8BD}";
+    pub const MIC: &str = "\u{E720}";
+    pub const MIC_OFF: &str = "\u{EC54}";
+    pub const HEADPHONE: &str = "\u{E7F6}";
+    pub const PHONE: &str = "\u{E717}";
+    pub const HANG_UP: &str = "\u{E778}";
+    pub const TIMER: &str = "\u{E916}";
+    pub const BACK: &str = "\u{E72B}";
+    pub const MINIMIZE: &str = "\u{E921}";
+    pub const CLOSE: &str = "\u{E711}";
+    pub const PREV: &str = "\u{E892}";
+    pub const NEXT: &str = "\u{E893}";
+    pub const PLAY: &str = "\u{E768}";
+    pub const PAUSE: &str = "\u{E769}";
+    pub const GAME: &str = "\u{E7FC}";
+    pub const MUSIC: &str = "\u{E8D6}";
+}
+
 pub fn white(a: f32) -> Color32 {
     Color32::from_white_alpha((a.clamp(0.0, 1.0) * 255.0) as u8)
 }

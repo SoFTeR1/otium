@@ -128,9 +128,11 @@ impl App {
             // the friends panel builds these itself
             SetMenu::Profile | SetMenu::Friend | SetMenu::Call | SetMenu::Group => return,
             SetMenu::Edit => return self.open_editor(focus),
+            SetMenu::Timer => self.timer_items(),
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
+                    item(SetKey::TimerOpen, "Таймер выключения", self.timer.left().map(super::control::fmt_left).unwrap_or_default()),
                     item(SetKey::Sleep, "Спящий режим", ""),
                     danger(SetKey::Restart, "Перезагрузка", ""),
                     danger(SetKey::Shutdown, "Выключение", ""),
@@ -166,6 +168,9 @@ impl App {
         }
         if menu == SetMenu::Edit {
             return self.edit_setting(key, focus);
+        }
+        if menu == SetMenu::Timer {
+            return self.timer_setting(key, focus);
         }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
@@ -244,6 +249,13 @@ impl App {
             | SetKey::CallNoise
             | SetKey::CallMic
             | SetKey::CallVad
+            | SetKey::Timer30
+            | SetKey::Timer60
+            | SetKey::Timer90
+            | SetKey::Timer120
+            | SetKey::TimerCustom
+            | SetKey::TimerAction
+            | SetKey::TimerCancel
             | SetKey::CallAdd
             | SetKey::CallHangup
             | SetKey::GroupVoice
@@ -296,6 +308,7 @@ impl App {
                 self.keyboard("Вторая строка статуса", &st, Target::DiscordState, 64, false);
                 return;
             }
+            SetKey::TimerOpen => return self.open_settings(SetMenu::Timer, 0),
             SetKey::Sleep => {
                 self.modal = None;
                 power_sleep();
@@ -365,6 +378,9 @@ impl App {
         if target.is_social() {
             return self.social_text(target, text);
         }
+        if target == Target::Timer {
+            return self.timer_text(&text);
+        }
         if matches!(target, Target::GameName | Target::GamePath | Target::GameArgs) {
             return self.edit_text(target, text);
         }
@@ -398,6 +414,7 @@ impl App {
             Some(Target::ApiKey) => self.open_settings(SetMenu::Account, 0),
             Some(Target::SteamId) => self.open_settings(SetMenu::Account, 1),
             Some(Target::DiscordState) => self.open_settings(SetMenu::Discord, 3),
+            Some(Target::Timer) => self.open_settings(SetMenu::Timer, 4),
             _ => self.open_settings(SetMenu::Main, 0),
         }
     }
@@ -502,7 +519,7 @@ impl App {
     }
 }
 
-fn power_sleep() {
+pub(super) fn power_sleep() {
     use windows::Win32::System::Power::SetSuspendState;
     // sleep, not hibernate
     unsafe {
