@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod account;
 mod app;
 mod data;
 mod discord;
@@ -8,6 +9,7 @@ mod fonts;
 mod input;
 mod keyboard;
 mod launch;
+mod nostr;
 mod modal;
 mod sound;
 mod steam;

@@ -41,6 +41,10 @@ ureq = { version = "2", features = ["json"] }
 regex = "1"
 rodio = { version = "0.19", default-features = false }
 tray-icon = "0.19"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+nostr-sdk = "0.45"
+nostr = { version = "0.45", features = ["nip04"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3

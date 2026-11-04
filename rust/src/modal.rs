@@ -21,6 +21,9 @@ pub enum Modal {
     Settings { menu: SetMenu, title: String, items: Vec<SetItem>, focus: usize, scroll: f32 },
     Keyboard(Box<crate::keyboard::Keyboard>),
     Confirm { title: String, text: String, yes: SetKey, yes_label: &'static str, focus: usize },
+    /// "find friends" results: (public key, name, state)
+    Players { items: Vec<(String, String, String)>, focus: usize, scroll: f32 },
+    FriendRequest { pk: String, name: String, focus: usize },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -29,6 +32,8 @@ pub enum SetMenu {
     Account,
     Discord,
     Power,
+    Profile,
+    Friend,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,6 +62,12 @@ pub enum SetKey {
     Restart,
     Shutdown,
     Quit,
+    ProfileCode,
+    ProfileRename,
+    ProfileKey,
+    ProfileLogout,
+    FriendChat,
+    FriendRemove,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +85,7 @@ pub enum CtlAction {
     Home,
     Settings,
     Power,
+    Social,
 }
 
 pub enum Action {
@@ -92,6 +104,8 @@ pub enum Action {
     Setting(SetMenu, SetKey, usize),
     Text(crate::keyboard::Outcome),
     Confirmed(SetKey),
+    RequestFriend(String, String),
+    AnswerRequest(String, bool),
 }
 
 const ADD_ITEMS: [&str; 2] = ["Импорт игр из Steam", "Выбрать exe или ярлык…"];
@@ -115,7 +129,8 @@ impl Modal {
             Modal::Message { .. } | Modal::News { .. } => 1,
             Modal::Trophies { items, .. } => items.len(),
             Modal::Settings { items, .. } => items.len(),
-            Modal::Confirm { .. } => 2,
+            Modal::Confirm { .. } | Modal::FriendRequest { .. } => 2,
+            Modal::Players { items, .. } => items.len(),
             Modal::Keyboard(_) => 0,
         }
     }
@@ -129,7 +144,9 @@ impl Modal {
             | Modal::Control { focus, .. }
             | Modal::Trophies { focus, .. }
             | Modal::Settings { focus, .. }
-            | Modal::Confirm { focus, .. } => Some(focus),
+            | Modal::Confirm { focus, .. }
+            | Modal::Players { focus, .. }
+            | Modal::FriendRequest { focus, .. } => Some(focus),
             Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) => None,
         }
     }
@@ -176,6 +193,11 @@ impl Modal {
             },
             Modal::Control { focus, items } if nav == Nav::Ok => Action::Control(items[*focus].0),
             Modal::Settings { menu, items, focus, .. } if nav == Nav::Ok => Action::Setting(*menu, items[*focus].key, *focus),
+            Modal::Players { items, focus, .. } if nav == Nav::Ok => {
+                let (pk, name, _) = items[*focus].clone();
+                Action::RequestFriend(pk, name)
+            }
+            Modal::FriendRequest { pk, focus, .. } if nav == Nav::Ok => Action::AnswerRequest(pk.clone(), *focus == 1),
             Modal::Confirm { yes, focus, .. } if nav == Nav::Ok => {
                 if *focus == 1 {
                     Action::Confirmed(*yes)
@@ -253,6 +275,36 @@ impl Modal {
                 rows(ui, r, s, &items, *focus, appear);
             }
             Modal::Keyboard(k) => k.paint(ui, screen, s, appear),
+            Modal::FriendRequest { name, focus, .. } => {
+                let r = panel(ui, screen, s, 620.0, &format!("{name} хочет добавить вас в друзья"), 2, appear);
+                rows(ui, r, s, &["Отклонить", "Принять"], *focus, appear);
+            }
+            Modal::Players { items, focus, scroll } => {
+                let visible = 7.min(items.len().max(1));
+                let r = panel(ui, screen, s, 760.0, "Найти друзей", visible, appear);
+                let target = (*focus as f32 - (visible as f32 - 2.0)).clamp(0.0, items.len().saturating_sub(visible) as f32);
+                *scroll += (target - *scroll) * (1.0 - (-dt * 18.0).exp());
+                let clip = ui.painter().with_clip_rect(r.expand(2.0));
+                for (i, (pk, name, state)) in items.iter().enumerate() {
+                    let y = r.top() + (i as f32 - *scroll) * ROW * s;
+                    if y + ROW * s < r.top() || y > r.bottom() {
+                        continue;
+                    }
+                    let row = Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), ROW * s - 6.0 * s));
+                    let f = i == *focus;
+                    if f {
+                        clip.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(appear));
+                    }
+                    let fg = if f { Color32::from_rgb(10, 12, 18) } else { white(appear) };
+                    let av = pos2(row.left() + 32.0 * s, row.center().y);
+                    clip.circle_filled(av, 20.0 * s, draw::name_color(pk));
+                    let letter = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                    clip.text(av, Align2::CENTER_CENTER, letter, semibold(18.0 * s), Color32::WHITE);
+                    clip.text(pos2(row.left() + 66.0 * s, row.top() + 10.0 * s), Align2::LEFT_TOP, name, semibold(20.0 * s), fg);
+                    clip.text(pos2(row.left() + 66.0 * s, row.bottom() - 8.0 * s), Align2::LEFT_BOTTOM, format!("код {}", crate::nostr::short_code(pk)), font(15.0 * s), fg.gamma_multiply(0.6));
+                    clip.text(pos2(row.right() - 18.0 * s, row.center().y), Align2::RIGHT_CENTER, state, font(17.0 * s), fg.gamma_multiply(0.7));
+                }
+            }
             Modal::Confirm { title, text, yes_label, focus, .. } => {
                 let r = panel(ui, screen, s, 620.0, title, 3, appear);
                 let galley = ui.painter().layout(text.clone(), font(19.0 * s), white(0.65 * appear), r.width() - 16.0 * s);

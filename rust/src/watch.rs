@@ -27,6 +27,7 @@ pub enum Event {
     FeedDone { appid: String },
     /// show the window (tray click); egui has to be told, or it keeps it hidden
     Show,
+    Nostr(crate::nostr::Msg),
     /// what's playing changed (None = nothing)
     Music(Option<crate::media::Music>),
 }

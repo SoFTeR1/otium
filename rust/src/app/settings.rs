@@ -119,6 +119,8 @@ impl App {
                     ],
                 )
             }
+            // the friends panel builds these itself
+            SetMenu::Profile | SetMenu::Friend => return,
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -146,6 +148,9 @@ impl App {
     }
 
     pub(super) fn apply_setting(&mut self, menu: SetMenu, key: SetKey, focus: usize) {
+        if matches!(menu, SetMenu::Profile | SetMenu::Friend) {
+            return self.social_setting(key);
+        }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
             order[(i + 1) % order.len()].to_string()
@@ -206,6 +211,12 @@ impl App {
                 self.set("closeToTray", v);
             }
             SetKey::Version => {}
+            SetKey::ProfileCode
+            | SetKey::ProfileRename
+            | SetKey::ProfileKey
+            | SetKey::ProfileLogout
+            | SetKey::FriendChat
+            | SetKey::FriendRemove => {}
             SetKey::ApiKey => {
                 let k = self.lib.setting_str("steamApiKey").to_string();
                 self.keyboard("Steam Web API-ключ", &k, Target::ApiKey, 64, true);
@@ -277,6 +288,9 @@ impl App {
 
     pub(super) fn confirmed(&mut self, key: SetKey) {
         self.modal = None;
+        if key == SetKey::ProfileLogout {
+            return self.social_logout();
+        }
         use std::os::windows::process::CommandExt;
         let arg = match key {
             SetKey::Restart => "/r",
@@ -289,8 +303,15 @@ impl App {
     pub(super) fn text_done(&mut self, o: Outcome) {
         let Outcome::Done(target, text) = o else {
             // cancelled: back to where the keyboard was opened from
+            if self.last_text_target.is_some_and(|t| t.is_social()) {
+                self.modal = None;
+                return;
+            }
             return self.reopen_after_text(None);
         };
+        if target.is_social() {
+            return self.social_text(target, text);
+        }
         match target {
             Target::User => {
                 let name: String = if text.is_empty() { "Игрок".into() } else { text };
@@ -310,6 +331,7 @@ impl App {
                 self.set("discordState", text);
                 self.update_discord();
             }
+            _ => {}
         }
         self.reopen_after_text(Some(target));
     }

@@ -11,6 +11,18 @@ pub enum Target {
     ApiKey,
     SteamId,
     DiscordState,
+    Chat,
+    AccountName,
+    LoginKey,
+    FindFriends,
+    Rename,
+}
+
+impl Target {
+    /// Text for the friends panel, not for the settings screens.
+    pub fn is_social(self) -> bool {
+        matches!(self, Target::Chat | Target::AccountName | Target::LoginKey | Target::FindFriends | Target::Rename)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -68,7 +80,7 @@ impl Keyboard {
     pub fn new(title: &str, text: &str, target: Target, max: usize, secret: bool) -> Self {
         // codes and keys are typed in latin letters; names usually in Russian
         let layout = match target {
-            Target::ApiKey | Target::SteamId => Layout::En,
+            Target::ApiKey | Target::SteamId | Target::LoginKey => Layout::En,
             _ => Layout::Ru,
         };
         Self { title: title.into(), text: text.into(), target, max, secret, layout, shift: false, row: 1, col: 0 }

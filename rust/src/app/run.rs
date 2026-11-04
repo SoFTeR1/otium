@@ -111,6 +111,9 @@ impl App {
         }
         if std::mem::take(&mut self.discord_soon) {
             self.update_discord();
+            // friends see what we're playing
+            self.publish_presence();
+            self.publish_library();
         }
         let Some(l) = self.launching.as_mut() else { return };
         let now = Instant::now();
@@ -294,6 +297,7 @@ impl App {
             }
             Event::GuideToggle => self.guide_pressed(),
             Event::Toast { text, error } => self.toast(&text, error),
+            Event::Nostr(m) => self.on_nostr(m),
             e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }
@@ -357,6 +361,7 @@ impl App {
             items.push((CtlAction::CloseGame, "Закрыть игру"));
         }
         items.push((CtlAction::Home, "Главный экран"));
+        items.push((CtlAction::Social, "Друзья и сообщения"));
         items.push((CtlAction::Settings, "Настройки"));
         items.push((CtlAction::Power, "Питание"));
         self.open(Modal::Control { focus: 0, items });
@@ -366,7 +371,8 @@ impl App {
         match c {
             CtlAction::ReturnToGame => self.back_to_game(),
             CtlAction::CloseGame => self.close_game(None),
-            CtlAction::Home => {}
+            CtlAction::Home => self.social.open = false,
+            CtlAction::Social => self.open_social(),
             CtlAction::Settings => self.open_settings(crate::modal::SetMenu::Main, 0),
             CtlAction::Power => self.open_settings(crate::modal::SetMenu::Power, 0),
         }

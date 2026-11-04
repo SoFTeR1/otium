@@ -17,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime};
 mod pages;
 mod run;
 mod settings;
+mod social;
 pub use pages::fmt_date;
 use run::Launching;
 
@@ -102,6 +103,7 @@ pub struct App {
     last_text_target: Option<crate::keyboard::Target>,
     /// the Discord status should be rebuilt (a game started or stopped)
     discord_soon: bool,
+    social: social::Social,
 }
 
 impl App {
@@ -129,6 +131,7 @@ impl App {
         crate::watch::start_steam(bus.clone());
         let steam_now = crate::watch::steam_running_now();
         let tray = crate::tray::Tray::new(own.clone(), bus.clone());
+        let social_bus = bus.clone();
         {
             let bus = bus.clone();
             crate::media::start(cc.egui_ctx.clone(), media_rx, idle.clone(), move |m| bus.send(crate::watch::Event::Music(m)));
@@ -176,8 +179,10 @@ impl App {
             pending_cmd: Vec::new(),
             last_text_target: None,
             discord_soon: false,
+            social: social::Social::new(social_bus),
             lib,
         };
+        app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
         if app.splash_start.is_some() && app.sounds_on() && !crate::tray::started_at_login() {
             crate::sound::play(crate::sound::Sfx::Splash);
@@ -278,6 +283,9 @@ impl App {
             self.apply(action, frame);
             return;
         }
+        if self.social.open {
+            return self.social_nav(nav);
+        }
         if self.pages.page != 0 && !matches!(nav, Nav::Add | Nav::Options) {
             return self.handle_page(nav);
         }
@@ -338,6 +346,8 @@ impl App {
             Action::Setting(menu, key, focus) => self.apply_setting(menu, key, focus),
             Action::Text(o) => self.text_done(o),
             Action::Confirmed(k) => self.confirmed(k),
+            Action::RequestFriend(pk, name) => self.request_friend(pk, name),
+            Action::AnswerRequest(pk, yes) => self.answer_request(pk, yes),
             Action::Control(c) => {
                 self.modal = None;
                 self.control(c);
@@ -569,6 +579,7 @@ impl eframe::App for App {
         }
         self.tick(ctx);
         self.tick_pages();
+        self.social_tick();
         self.idle.store(self.away_for_game, Ordering::Relaxed);
         self.poll_tray();
         self.on_close_requested(ctx);
@@ -709,9 +720,13 @@ impl App {
 
         let hints: Vec<(usize, &str)> = match (&self.modal, self.pages.page) {
             (Some(m), _) => m.hints(),
+            (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
             (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
             (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
+        if self.social.open {
+            self.paint_social(ui, rect, s);
+        }
         self.paint_hints(ui, rect, s, &hints);
 
         if let Some(m) = self.modal.as_mut() {
@@ -847,6 +862,13 @@ impl App {
         let av = pos2(c.left() - 40.0 * s, y);
         p.circle_filled(av, 22.0 * s, draw::name_color(user));
         p.text(av, Align2::CENTER_CENTER, draw::initials(user), semibold(17.0 * s), white(a));
+        // unread messages and friend requests
+        let unread = self.social_unread();
+        if unread > 0 {
+            let b = av + vec2(17.0 * s, -15.0 * s);
+            p.circle_filled(b, 11.0 * s, Color32::from_rgb(237, 66, 69));
+            p.text(b, Align2::CENTER_CENTER, unread.min(99).to_string(), semibold(13.0 * s), Color32::WHITE);
+        }
         if self.input.pad_connected {
             p.text(pos2(av.x - 40.0 * s, y), Align2::RIGHT_CENTER, "🎮", font(24.0 * s), white(0.75 * a));
         }
