@@ -1,7 +1,7 @@
 {
   "name": "ps5-launcher",
   "productName": "PS5 Launcher",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "PS5 Launcher",
   "author": "SoFTeR1",
   "repository": "github:SoFTeR1/ps5-launcher",
@@ -59,6 +59,7 @@
       "gamepad.js",
       "discord.js",
       "audio.js",
+      "overlay-preload.js",
       "renderer/**/*"
     ]
   },

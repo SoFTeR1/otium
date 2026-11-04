@@ -363,17 +363,22 @@ function renderSocial() {
     const pk = social.chat;
     const p = presenceOf(pk);
     const msgs = a.history[pk] || [];
+    const inThisCall = inCall() && call.pk === pk;
     right = `
-      <div class="schat-head">${avatar(pk, nameOf(pk))}<div><div class="t">${esc(nameOf(pk))}</div><div class="d ${p.game ? 'game' : ''}">${esc(p.text)}</div></div>
-        <button class="btn call-btn" id="sCall">${CALL_ICONS.phone} Позвонить <span class="kb">${GLYPHS[currentLayout()].menu[0]}</span></button></div>
-      <div class="smsgs" id="smsgs">${msgs.length ? msgs.map((m, i) => {
-        const day = new Date(m.at).toDateString();
-        const sep = i === 0 || new Date(msgs[i - 1].at).toDateString() !== day ? `<div class="sday">${fmtDate(m.at).replace(/, \d\d:\d\d$/, '')}</div>` : '';
-        return `${sep}<div class="smsg ${m.from === me.pk ? 'mine' : ''}"><div class="bubble">${esc(m.text)}</div><div class="time">${new Date(m.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div></div>`;
-      }).join('') : '<div class="sempty">Сообщений пока нет — напишите первым</div>'}</div>
+      <div class="schat-head">
+        <div class="hav">${avatar(pk, nameOf(pk))}<i class="pres ${p.online ? (p.game ? 'game' : 'on') : ''}"></i></div>
+        <div class="hname"><div class="t">${esc(nameOf(pk))}</div><div class="d ${p.game ? 'game' : ''}">${esc(p.text)}</div></div>
+        ${inThisCall ? '' : `<button class="hbtn call" id="sCall" title="Позвонить (${GLYPHS[currentLayout()].menu[0]})">${CALL_ICONS.phone}</button>`}
+      </div>
+      ${callStageHTML(pk)}
+      <div class="smsgs" id="smsgs">${msgs.length ? messageGroups(msgs) : `<div class="schat-hello">${avatar(pk, nameOf(pk), 'big')}<div class="t">${esc(nameOf(pk))}</div><div class="d">Это начало вашей переписки. Скажите привет 👋</div></div>`}</div>
+      <div class="emoji-tray hidden" id="emojiTray">${QUICK_EMOJI.map((e) => `<button>${e}</button>`).join('')}</div>
       <div class="sinput">
-        <input id="sInput" class="${social.zone === 'chat' && social.chatFocus === 0 ? 'focus' : ''}" placeholder="Сообщение для ${esc(nameOf(pk))}" maxlength="1000" value="${esc(social.draft || '')}"/>
-        <button class="btn primary ${social.zone === 'chat' && social.chatFocus === 1 ? 'focus' : ''}" id="sSend">Отправить</button>
+        <div class="sfield ${social.zone === 'chat' && social.chatFocus === 0 ? 'focus' : ''}">
+          <button class="emo-btn" id="sEmoji" title="Эмодзи">😊</button>
+          <input id="sInput" placeholder="Сообщение для ${esc(nameOf(pk))}" maxlength="1000" value="${esc(social.draft || '')}"/>
+        </div>
+        <button class="sendbtn ${social.zone === 'chat' && social.chatFocus === 1 ? 'focus' : ''}" id="sSend" title="Отправить">${SEND_ICON}</button>
       </div>`;
   }
 
@@ -389,10 +394,48 @@ function renderSocial() {
     inp.oninput = () => (social.draft = inp.value);
     inp.onfocus = () => { social.zone = 'chat'; social.chatFocus = 0; };
     $('#sSend').onclick = sendCurrent;
-    $('#sCall').onclick = () => startCall(social.chat);
+    if ($('#sCall')) $('#sCall').onclick = () => startCall(social.chat);
+    if ($('.vstage')) bindCallButtons($('.vstage'));
+    $('#sEmoji').onclick = () => $('#emojiTray').classList.toggle('hidden');
+    $$('#emojiTray button').forEach((b) => (b.onclick = () => {
+      inp.value += b.textContent;
+      social.draft = inp.value;
+      inp.focus();
+    }));
+    tickTimer();
     if (social.zone === 'chat' && social.chatFocus === 0 && document.activeElement !== inp && !osk.open) inp.focus();
   }
   $('#socLeft .sitem.focus')?.scrollIntoView({ block: 'nearest' });
+}
+
+// Discord-style: consecutive messages from one person within a few minutes share one header
+const QUICK_EMOJI = ['😂', '🔥', '👍', '❤️', '😎', '🎮', '🏆', '😭', '🤝', '💀', '🙏', '👀'];
+const SEND_ICON = '<svg viewBox="0 0 24 24"><path d="M3.4 20.4 20.9 12 3.4 3.6 3.4 10l12.5 2-12.5 2z"/></svg>';
+function messageGroups(msgs) {
+  const out = [];
+  let g = null;
+  for (const m of msgs) {
+    const day = new Date(m.at).toDateString();
+    if (!g || g.from !== m.from || g.day !== day || m.at - g.last > 5 * 60e3) {
+      if (!g || g.day !== day) out.push(`<div class="sday"><span>${fmtDate(m.at).replace(/, \d\d:\d\d$/, '')}</span></div>`);
+      g = { from: m.from, day, last: m.at, lines: [] };
+      out.push(g);
+    }
+    g.lines.push(m);
+    g.last = m.at;
+  }
+  const time = (t) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const jumbo = (t) => /^(\p{Extended_Pictographic}|\uFE0F|\u200D|\s){1,12}$/u.test(t) && t.trim().length <= 12;
+  return out.map((g) => {
+    if (typeof g === 'string') return g;
+    const mine = g.from === me.pk;
+    const name = mine ? acct().name : nameOf(g.from);
+    return `<div class="mgroup ${mine ? 'mine' : ''}">
+      <div class="mav">${avatar(g.from, name)}</div>
+      <div class="mcol"><div class="mhead"><b>${esc(name)}</b><span>${time(g.lines[0].at)}</span></div>
+        ${g.lines.map((l) => `<div class="mline ${jumbo(l.text) ? 'jumbo' : ''}"><span class="mt">${time(l.at)}</span>${esc(l.text)}</div>`).join('')}
+      </div></div>`;
+  }).join('');
 }
 
 function renderWelcome(el) {
@@ -477,7 +520,7 @@ function socialHandle(act, src) {
   // chat
   const m = $('#smsgs');
   if (act === 'back') { sfx.back(); social.zone = 'list'; document.activeElement?.blur(); return renderSocial(); }
-  if (act === 'menu') return startCall(social.chat);
+  if (act === 'menu') return inCall() && call.pk === social.chat ? openCallMenu() : startCall(social.chat);
   if (act === 'up' || act === 'down') { m?.scrollBy({ top: act === 'down' ? 140 : -140, behavior: 'smooth' }); return; }
   if (act === 'left') {
     if (social.chatFocus === 1) social.chatFocus = 0;

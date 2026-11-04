@@ -5,7 +5,14 @@
 const OSK_LAYOUTS = {
   ru: ['1234567890', 'йцукенгшщзхъ', 'фывапролджэ', 'ячсмитьбю.'],
   en: ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm,.'],
-  sym: ['1234567890', '-/:;()?!@"', '#%+=_*&\'<>', '~$€₽[]{}|\\']
+  sym: ['1234567890', '-/:;()?!@"', '#%+=_*&\'<>', '~$€₽[]{}|\\'],
+  // emoji rows are arrays: some emoji are several code points
+  emo: [
+    ['😂', '🤣', '😊', '😍', '😎', '🤔', '😭', '😡', '🥶', '💀'],
+    ['👍', '👎', '👏', '🙏', '🤝', '💪', '👀', '🫡', '🤙', '✌️'],
+    ['🔥', '❤️', '💯', '⚡', '🎉', '🏆', '🎮', '🕹️', '🎧', '🍕'],
+    ['😴', '🤡', '🤯', '🥳', '😏', '🙃', '😬', '🤬', '🫠', '✅']
+  ]
 };
 // shift = one capital letter (⇧ key), caps = Caps Lock (LB on the gamepad)
 const osk = { open: false, input: null, layout: 'ru', shift: false, caps: false, row: 1, el: null, onDone: null };
@@ -29,7 +36,7 @@ function closeOSK(submit) {
 }
 
 function renderOSK() {
-  const upper = osk.shift !== osk.caps;
+  const upper = osk.shift !== osk.caps && osk.layout !== 'emo';
   const rows = OSK_LAYOUTS[osk.layout].map((r) => [...r].map((ch) => (upper ? ch.toUpperCase() : ch)));
   const keyHTML = (label, act, cls = '') => `<button class="key ${cls}" data-act="${esc(act)}">${esc(label)}</button>`;
   $('#osk').innerHTML = `
@@ -39,6 +46,7 @@ function renderOSK() {
       <div class="krow">
         ${keyHTML(osk.layout === 'sym' ? 'АБВ' : '?123', 'sym', 'wide')}
         ${keyHTML(osk.layout === 'en' ? 'RU' : 'EN', 'lang', 'wide')}
+        ${keyHTML(osk.layout === 'emo' ? 'АБВ' : '😊', 'emo', 'wide')}
         ${keyHTML('Пробел', 'space', 'space')}
         ${keyHTML('⌫', 'back', 'wide')}
         ${keyHTML('Готово', 'done', 'wide done')}
@@ -84,6 +92,7 @@ function pressKey(act) {
   } else if (act === 'shift') osk.shift = !osk.shift;
   else if (act === 'lang') osk.layout = osk.layout === 'en' ? 'ru' : 'en';
   else if (act === 'sym') osk.layout = osk.layout === 'sym' ? 'ru' : 'sym';
+  else if (act === 'emo') osk.layout = osk.layout === 'emo' ? 'ru' : 'emo';
   else if (act === 'done') return closeOSK(true);
   renderOSK();
 }
@@ -168,8 +177,11 @@ function renderCC() {
   else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
   if (inCall() && call.state === 'active') {
     items.push({ cls: 'wide game', html: `<div class="ccimg call-ic">${CALL_ICONS.phone}</div><div><div class="d">Звонок</div><div class="t">${esc(nameOf(call.pk))}</div><div class="d">${call.muted ? 'микрофон выключен' : 'микрофон включён'}</div></div>`, ok: () => { toggleMic(); renderCC(); } });
-    items.push({ cls: 'ctl', html: call.muted ? CALL_ICONS.micOff.replace('<svg', '<svg class="ci"') : CALL_ICONS.mic.replace('<svg', '<svg class="ci"'), ok: () => { toggleMic(); renderCC(); } });
-    items.push({ cls: 'ctl hangup', html: CALL_ICONS.hang.replace('<svg', '<svg class="ci"'), ok: () => { hangUp(); renderCC(); } });
+    const ic = (s) => s.replace('<svg', '<svg class="ci"');
+    items.push({ cls: 'ctl' + (call.muted ? ' off' : ''), html: ic(call.muted ? CALL_ICONS.micOff : CALL_ICONS.mic), ok: () => { toggleMic(); renderCC(); } });
+    items.push({ cls: 'ctl' + (call.deafened ? ' off' : ''), html: ic(call.deafened ? CALL_ICONS.headOff : CALL_ICONS.head), ok: () => { toggleDeafen(); renderCC(); } });
+    items.push({ cls: 'ctl', html: ic(CALL_ICONS.gear), ok: () => { closeCC(); openCallMenu(); } });
+    items.push({ cls: 'ctl hangup', html: ic(CALL_ICONS.hang), ok: () => { hangUp(); renderCC(); } });
   }
   items.push({ cls: 'home', html: `${CC_ICONS.home}<div class="d">Главная</div>`, ok: () => { closeCC(); zone = 'row'; update(); } });
   if (m?.title) {

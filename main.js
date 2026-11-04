@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -80,6 +80,8 @@ function createWindow() {
     }
   });
   win.setMenu(null);
+  win.on('focus', () => toOverlay({ type: 'focus', focused: true }));
+  win.on('blur', () => toOverlay({ type: 'focus', focused: false }));
   // never let the desktop show: if anything minimises us (Win+D, a game), come straight back
   win.on('minimize', () => {
     if (!quitting) setTimeout(() => win && !win.isDestroyed() && win.restore(), 120);
@@ -93,6 +95,34 @@ function createWindow() {
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
   });
 }
+
+// ---------- Overlay: a transparent, click-through, always-on-top window over every app ----------
+// Shows the call pill, incoming calls and notifications while the launcher itself isn't in focus.
+let overlay = null;
+function createOverlay() {
+  const d = screen.getDisplayMatching(win.getBounds()).bounds;
+  overlay = new BrowserWindow({
+    x: d.x, y: d.y, width: d.width, height: d.height,
+    transparent: true, frame: false, resizable: false, movable: false, focusable: false,
+    skipTaskbar: true, hasShadow: false, show: false, backgroundColor: '#00000000',
+    webPreferences: { preload: path.join(__dirname, 'overlay-preload.js'), contextIsolation: true, backgroundThrottling: false }
+  });
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.setIgnoreMouseEvents(true, { forward: true });
+  overlay.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
+  overlay.webContents.once('did-finish-load', () => overlay.webContents.send('overlay:msg', { type: 'focus', focused: win.isFocused() }));
+  overlay.on('closed', () => (overlay = null));
+}
+const toOverlay = (m) => overlay && !overlay.isDestroyed() && overlay.webContents.send('overlay:msg', m);
+ipcMain.on('overlay:send', (_e, m) => toOverlay(m));
+ipcMain.on('overlay:action', (_e, a) => send('overlay:action', a));
+ipcMain.on('overlay:interactive', (_e, on) => overlay?.setIgnoreMouseEvents(!on, { forward: true }));
+// only show the window while it has something on it, so it never sits over a game for nothing
+ipcMain.on('overlay:visible', (_e, on) => {
+  if (!overlay) return;
+  if (on && !overlay.isVisible()) { overlay.showInactive(); overlay.setAlwaysOnTop(true, 'screen-saver'); }
+  else if (!on && overlay.isVisible()) overlay.hide();
+});
 
 function restoreWindow() {
   if (!win) return;
@@ -339,6 +369,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(['media', 'notifications', 'fullscreen'].includes(perm)));
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => ['media', 'notifications', 'fullscreen'].includes(perm));
   createWindow();
+  createOverlay();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
   ownHwnd = hwnd;

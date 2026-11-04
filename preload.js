@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   discordActivity: (a) => ipcRenderer.invoke('discord:activity', a),
   discordStatus: () => ipcRenderer.invoke('discord:status'),
   power: (action) => ipcRenderer.invoke('power:do', action),
+  overlaySend: (m) => ipcRenderer.send('overlay:send', m),
+  onOverlayAction: on('overlay:action'),
   audio: (cmd) => ipcRenderer.invoke('audio:cmd', cmd),
   appIcon: (p) => ipcRenderer.invoke('audio:icon', p),
 

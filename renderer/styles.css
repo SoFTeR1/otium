@@ -581,6 +581,91 @@ body.cc-open .toasts { bottom: 200px; }
 .cci.hangup { background: rgba(239, 68, 68, 0.3); }
 .cci.hangup .ci { fill: #ff8a98; }
 
+/* ---------- Chat 2.0 (Discord-like, glass) ---------- */
+.soc-right {
+  background: linear-gradient(180deg, rgba(30, 38, 62, 0.55), rgba(14, 18, 32, 0.7));
+  border: 1px solid rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.schat-head { gap: 14px; padding: 14px 20px; background: rgba(255, 255, 255, 0.03); }
+.schat-head .hav { position: relative; }
+.schat-head .hav .pres { left: 32px; top: 32px; }
+.schat-head .hname { flex: 1; min-width: 0; }
+.hbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, 0.08); transition: background 0.15s, transform 0.15s; }
+.hbtn:hover { transform: scale(1.06); }
+.hbtn svg { width: 20px; height: 20px; fill: #fff; }
+.hbtn.call { background: linear-gradient(135deg, #2fd27a, #16a34a); box-shadow: 0 8px 22px rgba(34, 197, 94, 0.35); }
+
+.smsgs { padding: 10px 0 14px; gap: 0; }
+.sday { display: flex; align-items: center; gap: 12px; margin: 14px 22px 6px; color: var(--dim); font-size: 12px; }
+.sday::before, .sday::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, 0.08); }
+.mgroup { display: flex; gap: 14px; padding: 8px 22px 2px; animation: cardIn 0.25s var(--ease) both; }
+.mgroup:hover { background: rgba(255, 255, 255, 0.025); }
+.mav .sav { width: 42px; height: 42px; font-size: 17px; }
+.mcol { min-width: 0; flex: 1; }
+.mhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+.mhead b { font-size: 15px; font-weight: 600; background: linear-gradient(90deg, #fff, #c9d6f5); -webkit-background-clip: text; color: transparent; }
+.mgroup.mine .mhead b { background: linear-gradient(90deg, #8fc2ff, #4f8bff); -webkit-background-clip: text; }
+.mhead span { font-size: 11px; color: var(--dim); }
+.mline { position: relative; font-size: 15px; line-height: 1.45; color: #e3e9f7; white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.mline .mt { position: absolute; left: -56px; top: 3px; width: 42px; text-align: right; font-size: 10px; color: var(--dim); opacity: 0; }
+.mline:hover .mt { opacity: 1; }
+.mline.jumbo { font-size: 42px; line-height: 1.2; }
+.schat-hello { margin: auto; text-align: center; color: var(--dim); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 30px; }
+.schat-hello .sav.big { width: 84px; height: 84px; font-size: 34px; }
+.schat-hello .t { color: #fff; font-size: 22px; font-weight: 600; }
+
+.sinput { align-items: center; padding: 12px 18px 16px; border-top: none; }
+.sfield { flex: 1; display: flex; align-items: center; gap: 4px; height: 50px; padding: 0 6px 0 4px; border-radius: 16px; background: rgba(255, 255, 255, 0.07); border: 2px solid transparent; transition: border-color 0.15s, background 0.15s; }
+.sfield.focus, .sfield:focus-within { border-color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.1); }
+.sfield input { flex: 1; height: 100%; background: none; border: 0; outline: none; color: #fff; font: inherit; font-size: 15px; padding: 0 8px; }
+.emo-btn { width: 40px; height: 40px; border-radius: 10px; font-size: 20px; filter: grayscale(0.6); transition: filter 0.15s, transform 0.15s; }
+.emo-btn:hover { filter: none; transform: scale(1.1); }
+.sendbtn { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: linear-gradient(135deg, #5ba8ff, #2f6bff); box-shadow: 0 8px 22px rgba(47, 107, 255, 0.35); transition: transform 0.15s; }
+.sendbtn:hover, .sendbtn.focus { transform: scale(1.06); box-shadow: 0 0 0 2px #fff, 0 8px 22px rgba(47, 107, 255, 0.45); }
+.sendbtn svg { width: 22px; height: 22px; fill: #fff; }
+.emoji-tray { display: flex; gap: 4px; padding: 6px 18px 0; flex-wrap: wrap; }
+.emoji-tray.hidden { display: none; }
+.emoji-tray button { width: 40px; height: 40px; border-radius: 10px; font-size: 22px; transition: background 0.12s, transform 0.12s; }
+.emoji-tray button:hover { background: rgba(255, 255, 255, 0.1); transform: scale(1.12); }
+
+/* voice stage at the top of the chat while in a call with this friend */
+.vstage {
+  margin: 12px 16px 4px; padding: 14px 16px 16px; border-radius: 18px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(47, 107, 255, 0.28), rgba(10, 14, 28, 0.9) 70%);
+  border: 1px solid rgba(255, 255, 255, 0.08); animation: cardIn 0.35s var(--ease) both;
+}
+.vstage-top { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9fb0d8; }
+.vstage-top b { color: #7cf0a4; font-variant-numeric: tabular-nums; font-weight: 600; }
+.vdot { width: 8px; height: 8px; border-radius: 50%; background: #5be38a; box-shadow: 0 0 10px #5be38a; animation: blink 2s ease-in-out infinite; }
+.vtiles { display: flex; justify-content: center; gap: 18px; margin: 14px 0; }
+.vtile { width: 190px; padding: 16px 10px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.05); text-align: center; transition: box-shadow 0.15s, background 0.15s; }
+.vtile .sav.big { width: 78px; height: 78px; font-size: 32px; margin: 0 auto; transition: box-shadow 0.12s; }
+.vtile.speaking { background: rgba(91, 227, 138, 0.08); }
+.vtile.speaking .sav.big { box-shadow: 0 0 0 3px #5be38a, 0 0 26px rgba(91, 227, 138, 0.7); }
+.vname { margin-top: 10px; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.vic svg { width: 16px; height: 16px; fill: #ff8a98; }
+.vdock { display: flex; justify-content: center; align-items: center; gap: 12px; }
+.vbtn, .pbtn { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, 0.1); transition: background 0.15s, transform 0.15s; }
+.pbtn { width: 38px; height: 38px; }
+.vbtn:hover, .pbtn:hover { background: rgba(255, 255, 255, 0.2); transform: scale(1.06); }
+.vbtn svg, .pbtn svg { width: 21px; height: 21px; fill: #fff; }
+.pbtn svg { width: 19px; height: 19px; }
+.vbtn.off, .pbtn.off { background: rgba(239, 68, 68, 0.22); }
+.vbtn.off svg, .pbtn.off svg { fill: #ff8a98; }
+.vbtn.hang, .pbtn.hang { background: #ef4444; }
+.vbtn.hang { width: 58px; border-radius: 23px; }
+.vvol { display: flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 13px; color: var(--dim); }
+.vvol svg { width: 18px; height: 18px; fill: var(--dim); }
+.call.active.stage-visible { display: none; }
+.rbadge { position: absolute; right: -3px; bottom: -3px; width: 17px; height: 17px; border-radius: 50%; background: #ef4444; display: grid; place-items: center; box-shadow: 0 0 0 2px #10162a; }
+.rbadge svg { width: 10px; height: 10px; fill: #fff; }
+.call-av.small { position: relative; }
+.volbar { display: inline-block; width: 90px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); margin-right: 10px; vertical-align: middle; overflow: hidden; }
+.volbar i { display: block; height: 100%; background: linear-gradient(90deg, #6bb8ff, #2f6bff); border-radius: 3px; }
+.menu-item.focus .volbar { background: rgba(0, 0, 0, 0.15); }
+.cci.off { background: rgba(239, 68, 68, 0.25); }
+.cci.off .ci { fill: #ff8a98; }
+
 /* wallpaper list */
 .wp-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .wp { position: relative; width: 150px; height: 86px; border-radius: 10px; background: #2a3042 center / cover no-repeat; font-size: 28px; }

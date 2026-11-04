@@ -105,6 +105,11 @@ function save() {
 // Steam-style notification cards, bottom-left, up to three stacked.
 // opts: { title, img (picture url), icon (emoji/text), avatar: { name, key } }
 function toast(msg, err = false, opts = {}) {
+  // launcher not in front (a game or another app is) → show it in the always-on-top overlay instead
+  if (window.api && !document.hasFocus()) {
+    ipc.overlaySend({ type: 'toast', text: msg, err, title: opts.title, img: opts.img, icon: opts.icon, avatar: opts.avatar, ms: opts.ms });
+    return;
+  }
   const box = $('#toasts');
   const el = document.createElement('div');
   el.className = 'note' + (err ? ' err' : '');
@@ -726,6 +731,7 @@ function setModalFocus(i, sound = true) {
 }
 
 function modalHandle(act, src) {
+  if (callMenuKey(act)) return;
   const els = modalEls();
   const el = els[modal.idx];
   if (act === 'back') {
