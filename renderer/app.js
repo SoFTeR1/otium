@@ -1014,6 +1014,7 @@ function openSettings(focus = 0) {
     ['sep'],
     ['layout', 'Кнопки геймпада', LAYOUT_NAMES[s.padLayout || 'auto']],
     ['sounds', 'Звуки интерфейса', onoff(s.sounds)],
+    ['splash', 'Заставка при запуске', onoff(s.splash !== false)],
     ['fullscreen', 'Полноэкранный режим', onoff(s.fullscreen)],
     ['autostart', 'Запускать вместе с Windows', onoff(s.autostart)],
     ['tray', 'При закрытии окна', s.closeToTray === false ? 'Выйти' : 'Свернуть в трей'],
@@ -1038,6 +1039,7 @@ function openSettings(focus = 0) {
       return openSettings(i);
     }
     if (id === 'sounds') return toggle('sounds');
+    if (id === 'splash') { s.splash = s.splash === false; await save(); return openSettings(i); }
     if (id === 'fullscreen') return toggle('fullscreen', ipc.setFullscreen);
     if (id === 'account') return openSteamAccount();
     if (id === 'tray') {
@@ -1199,6 +1201,8 @@ async function importSteam() {
 
 // ---------- Input handling ----------
 function handle(act, src) {
+  // any button skips the startup splash; the press itself goes nowhere
+  if (splashBusy()) { splashSkip(); return; }
   if (busy) {
     if (act === 'back' && launching) { sfx.back(); launching.cancel(); }
     return;
@@ -1411,6 +1415,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   socialStart();
   profileInit();
   requestAnimationFrame(pollPads);
+  // startup splash over the freshly laid-out home screen (quiet when Windows started us at login)
+  if (data.settings.splash === false) splashSkip(true);
+  else {
+    const atLogin = await ipc.launchedAtLogin?.().catch(() => false);
+    requestAnimationFrame(() => splashPlay({ sound: data.settings.sounds && !atLogin }));
+  }
   // fade in once the first frame is laid out
   setTimeout(() => document.body.classList.remove('booting'), 120);
 

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
 
   launch: (game) => ipcRenderer.invoke('game:launch', game),
   closeGame: (game) => ipcRenderer.invoke('game:close', game),
+  launchedAtLogin: () => ipcRenderer.invoke('app:atLogin'),
   closeFrontGame: () => ipcRenderer.invoke('game:closeFront'),
   gameRunning: () => ipcRenderer.invoke('game:running'),
   cover: (on) => ipcRenderer.invoke('win:cover', on),

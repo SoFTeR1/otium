@@ -26,7 +26,8 @@ const DEFAULT_DATA = {
     bgMode: 'game', wallpaper: '', liveTrailers: true, steamApiKey: '', steamId: '',
     // the shared "PS5 Launcher" Discord application — an app ID is public, everyone can use the same one
     discordId: '1567308312947728414',
-    closeToTray: true
+    closeToTray: true,
+    splash: true
   }
 };
 
@@ -80,7 +81,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      // the startup splash plays its sound before anyone has clicked
+      autoplayPolicy: 'no-user-gesture-required'
     }
   });
   win.setMenu(null);
@@ -477,12 +480,15 @@ ipcMain.handle('shell:openUrl', (_e, url) => {
 
 ipcMain.handle('win:fullscreen', (_e, on) => win.setFullScreen(on));
 ipcMain.handle('win:quit', () => app.quit());
-ipcMain.handle('app:autostart', (_e, on) => {
+ipcMain.handle('app:autostart', (_e, on) => setAutostart(on));
+function setAutostart(on) {
   const opts = app.isPackaged
-    ? { openAtLogin: on, path: process.execPath }
-    : { openAtLogin: on, path: process.execPath, args: [app.getAppPath()] };
+    ? { openAtLogin: on, path: process.execPath, args: ['--autostart'] }
+    : { openAtLogin: on, path: process.execPath, args: [app.getAppPath(), '--autostart'] };
   app.setLoginItemSettings(opts);
-});
+}
+// started by Windows at login (the splash then plays without sound)
+ipcMain.handle('app:atLogin', () => process.argv.includes('--autostart'));
 ipcMain.handle('app:version', () => app.getVersion());
 
 // ---------- Updates (GitHub releases) ----------
@@ -521,6 +527,8 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => ['media', 'notifications', 'fullscreen'].includes(perm));
   createWindow();
   createOverlay();
+  // older versions registered autostart without the --autostart flag
+  if (app.isPackaged && loadData().settings.autostart) setAutostart(true);
   createTray();
   // Guide / View+Start on the gamepad: bring the launcher up from anywhere (or hand control back to the game)
   const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
