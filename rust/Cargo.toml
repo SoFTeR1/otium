@@ -1,13 +1,13 @@
 [package]
 name = "otium"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 edition = "2021"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
 authors = ["SoFTeR1"]
 publish = false
 
 [dependencies]
-eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts", "persistence"] }
+eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "persistence"] }
 egui = "0.31"
 egui_extras ={ version = "0.31", features = ["all_loaders"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
