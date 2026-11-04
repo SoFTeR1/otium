@@ -8,6 +8,9 @@ mod input;
 mod launch;
 mod modal;
 mod steam;
+mod thumbs;
+mod watch;
+mod win;
 
 use std::sync::Arc;
 

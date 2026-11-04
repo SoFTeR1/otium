@@ -10,13 +10,24 @@ use std::collections::HashSet;
 pub enum Modal {
     Add { focus: usize },
     Import { list: Vec<SteamGame>, picked: HashSet<String>, focus: usize, scroll: f32 },
-    Options { focus: usize, game: String },
+    Options { focus: usize, game: String, running: bool },
+    /// the Guide-button menu over a running game
+    Control { focus: usize, items: Vec<(CtlAction, &'static str)> },
     ConfirmDelete { focus: usize, game: String },
     Message { title: String, text: String },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CtlAction {
+    ReturnToGame,
+    CloseGame,
+    Home,
+}
+
 pub enum Action {
     None,
+    Control(CtlAction),
+    CloseGame,
     Close,
     PickFile,
     OpenImport,
@@ -42,6 +53,7 @@ impl Modal {
         match self {
             Modal::Add { .. } => ADD_ITEMS.len(),
             Modal::Options { .. } => OPTION_ITEMS.len(),
+            Modal::Control { items, .. } => items.len(),
             Modal::ConfirmDelete { .. } => CONFIRM_ITEMS.len(),
             Modal::Import { list, .. } => list.len() + 1,
             Modal::Message { .. } => 1,
@@ -50,7 +62,11 @@ impl Modal {
 
     fn focus_mut(&mut self) -> Option<&mut usize> {
         match self {
-            Modal::Add { focus } | Modal::Options { focus, .. } | Modal::ConfirmDelete { focus, .. } | Modal::Import { focus, .. } => {
+            Modal::Add { focus }
+            | Modal::Options { focus, .. }
+            | Modal::ConfirmDelete { focus, .. }
+            | Modal::Import { focus, .. }
+            | Modal::Control { focus, .. } => {
                 Some(focus)
             }
             Modal::Message { .. } => None,
@@ -80,7 +96,9 @@ impl Modal {
                 0 => Action::OpenImport,
                 _ => Action::PickFile,
             },
-            Modal::Options { focus, .. } if nav == Nav::Ok => match focus {
+            Modal::Control { focus, items } if nav == Nav::Ok => Action::Control(items[*focus].0),
+            Modal::Options { focus, running, .. } if nav == Nav::Ok => match focus {
+                0 if *running => Action::CloseGame,
                 0 => Action::Play,
                 1 => Action::MakeFirst,
                 _ => Action::AskDelete,
@@ -137,9 +155,18 @@ impl Modal {
                 let r = panel(ui, screen, s, 620.0, "Добавить", ADD_ITEMS.len(), appear);
                 rows(ui, r, s, &ADD_ITEMS, *focus, appear);
             }
-            Modal::Options { focus, game } => {
-                let r = panel(ui, screen, s, 620.0, game, OPTION_ITEMS.len(), appear);
-                rows(ui, r, s, &OPTION_ITEMS, *focus, appear);
+            Modal::Options { focus, game, running } => {
+                let mut items = OPTION_ITEMS;
+                if *running {
+                    items[0] = "Закрыть игру";
+                }
+                let r = panel(ui, screen, s, 620.0, game, items.len(), appear);
+                rows(ui, r, s, &items, *focus, appear);
+            }
+            Modal::Control { focus, items } => {
+                let labels: Vec<&str> = items.iter().map(|(_, l)| *l).collect();
+                let r = panel(ui, screen, s, 620.0, "Центр управления", labels.len(), appear);
+                rows(ui, r, s, &labels, *focus, appear);
             }
             Modal::ConfirmDelete { focus, game } => {
                 let r = panel(ui, screen, s, 620.0, &format!("Удалить «{game}»?"), CONFIRM_ITEMS.len() + 1, appear);
@@ -242,7 +269,7 @@ fn rows(ui: &egui::Ui, r: Rect, s: f32, items: &[&str], focus: usize, a: f32) {
         if f {
             p.rect_filled(row, CornerRadius::same((12.0 * s) as u8), white(a));
         }
-        let danger = label.starts_with("Удалить");
+        let danger = label.starts_with("Удалить") || label.starts_with("Закрыть");
         let color = match (f, danger) {
             (true, _) => Color32::from_rgb(10, 12, 18),
             (false, true) => Color32::from_rgb(255, 110, 110).gamma_multiply(a),

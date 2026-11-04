@@ -9,7 +9,13 @@ use crate::steam::{self, LocalStat};
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect, Stroke, StrokeKind};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
+
+mod run;
+use run::Launching;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Zone {
@@ -54,11 +60,35 @@ pub struct App {
     started: Instant,
     backed_up: bool,
     refocus: bool,
+
+    // ---- running games ----
+    events: Receiver<crate::watch::Event>,
+    bus: crate::watch::Bus,
+    /// OTIUM's own window handle, shared with the Guide watcher
+    own: Arc<AtomicIsize>,
+    pids: crate::launch::Pids,
+    /// ids of games that are running right now
+    running: HashSet<String>,
+    /// Steam app id -> when it started running
+    steam_since: HashMap<u32, SystemTime>,
+    steam_now: u32,
+    launching: Option<Launching>,
+    /// the game's window, to hand control back to it
+    game_hwnd: isize,
+    /// a game was started and OTIUM stepped aside for it
+    away_for_game: bool,
+    reload_steam_at: Option<Instant>,
+    /// when the last game was started, to find its window again
+    last_launch: Option<SystemTime>,
+    /// last time the launch splash re-asserted "always on top"
+    covered_at: Instant,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        // tried before egui_extras' loaders: decodes in the background and downscales
+        cc.egui_ctx.add_image_loader(std::sync::Arc::new(crate::thumbs::Thumbs::default()));
         crate::fonts::install(&cc.egui_ctx);
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
@@ -69,6 +99,13 @@ impl App {
         let splash = lib.setting_bool("splash", true);
         let fullscreen = lib.setting_bool("fullscreen", true);
         let (_, steam_stats) = steam::local_stats();
+        let (tx, events) = std::sync::mpsc::channel();
+        let bus = crate::watch::Bus::new(tx, cc.egui_ctx.clone());
+        let own = Arc::new(AtomicIsize::new(0));
+        crate::watch::start_guide(bus.clone(), own.clone());
+        crate::watch::start_hotkey(bus.clone(), own.clone());
+        crate::watch::start_steam(bus.clone());
+        let steam_now = crate::watch::steam_running_now();
         let mut app = Self {
             games: Vec::new(),
             art: HashMap::new(),
@@ -89,8 +126,25 @@ impl App {
             started: Instant::now(),
             backed_up: false,
             refocus: false,
+            events,
+            bus,
+            own,
+            pids: Default::default(),
+            running: HashSet::new(),
+            steam_since: HashMap::new(),
+            steam_now,
+            launching: None,
+            game_hwnd: 0,
+            away_for_game: false,
+            reload_steam_at: None,
+            last_launch: None,
+            covered_at: Instant::now(),
             lib,
         };
+        // a Steam game that was already running when OTIUM started
+        if steam_now != 0 {
+            app.steam_since.insert(steam_now, SystemTime::now());
+        }
         app.refresh(None);
         app
     }
@@ -144,6 +198,9 @@ impl App {
     }
 
     fn handle(&mut self, nav: Nav, frame: &eframe::Frame) {
+        if nav == Nav::Guide {
+            return self.guide_pressed();
+        }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
             self.apply(action, frame);
@@ -162,10 +219,11 @@ impl App {
             (Zone::Play | Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
             (Zone::More, Nav::Ok) | (_, Nav::Options) => {
                 if let Some(g) = self.games.get(self.sel) {
-                    let game = g.name.clone();
-                    self.open(Modal::Options { focus: 0, game });
+                    let (game, running) = (g.name.clone(), self.is_running(g));
+                    self.open(Modal::Options { focus: 0, game, running });
                 }
             }
+            (_, Nav::Guide) => self.open_control(),
             (_, Nav::Add) => self.open(Modal::Add { focus: 0 }),
             _ => {}
         }
@@ -187,6 +245,16 @@ impl App {
             Action::Play => {
                 self.modal = None;
                 self.launch_selected();
+            }
+            Action::CloseGame => {
+                self.modal = None;
+                if let Some(g) = self.games.get(self.sel).cloned() {
+                    self.close_game(Some(g));
+                }
+            }
+            Action::Control(c) => {
+                self.modal = None;
+                self.control(c);
             }
             Action::MakeFirst => {
                 self.modal = None;
@@ -316,10 +384,11 @@ impl App {
 
     fn launch_selected(&mut self) {
         let Some(game) = self.games.get(self.sel).cloned() else { return };
-        match crate::launch::launch(&game) {
-            Ok(()) => self.toast(&format!("Запуск: {}", game.name), false),
-            Err(e) => self.toast(&e, true),
+        if self.is_running(&game) {
+            // already running: Play just goes back to it
+            return self.back_to_game();
         }
+        self.start_launch(game);
     }
 
     fn toast(&mut self, text: &str, error: bool) {
@@ -330,6 +399,15 @@ impl App {
     fn playtime(&self, g: &Game) -> f64 {
         let steam = g.steam_app_id().and_then(|id| self.steam_stats.get(&id)).map_or(0.0, |s| s.playtime);
         g.playtime.unwrap_or(0.0).max(steam)
+    }
+}
+
+/// The native window handle of OTIUM's window (0 until it exists).
+fn own_hwnd(frame: &eframe::Frame) -> isize {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match frame.window_handle().map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Win32(h)) => h.hwnd.get(),
+        _ => 0,
     }
 }
 
@@ -397,6 +475,13 @@ fn now_ms() -> f64 {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(16));
+        if self.own.load(Ordering::Relaxed) == 0 {
+            self.own.store(own_hwnd(frame), Ordering::Relaxed);
+        }
+        while let Ok(e) = self.events.try_recv() {
+            self.on_event(e);
+        }
+        self.tick(ctx);
         let navs = self.input.poll(ctx);
 
         if ctx.input(|i| crate::input::key_pressed(i, egui::Key::F11)) {
@@ -417,6 +502,13 @@ impl eframe::App for App {
             }
         } else {
             for nav in navs {
+                // the launch splash takes B / Esc to hide itself; everything else waits
+                if self.launching.is_some() {
+                    if nav == Nav::Back {
+                        self.hide_launch();
+                    }
+                    continue;
+                }
                 self.handle(nav, frame);
             }
         }
@@ -424,7 +516,10 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_rgb(6, 8, 14))).show(ctx, |ui| {
             match self.splash_start {
                 Some(start) => splash(ui, start.elapsed().as_secs_f32()),
-                None => self.home(ui),
+                None => {
+                    self.home(ui);
+                    self.paint_launch(ui);
+                }
             }
         });
     }
@@ -587,6 +682,9 @@ impl App {
         }
 
         let mut info = Vec::new();
+        if self.is_running(g) {
+            info.push("● Запущена".to_string());
+        }
         let secs = self.playtime(g);
         if secs >= 60.0 {
             info.push(format_playtime(secs));

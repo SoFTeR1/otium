@@ -200,6 +200,16 @@ pub fn scan() -> Result<Vec<SteamGame>, String> {
     Ok(games)
 }
 
+/// Folder a Steam game is installed in (`steamapps/common/<installdir>`), to find its processes.
+pub fn install_dir(app_id: &str) -> Option<PathBuf> {
+    let root = root()?;
+    libraries(&root).into_iter().find_map(|lib| {
+        let v = read_vdf(&lib.join("steamapps").join(format!("appmanifest_{app_id}.acf")))?;
+        let dir = v.str(&["AppState", "installdir"])?;
+        Some(lib.join("steamapps").join("common").join(dir))
+    })
+}
+
 /// Path to a piece of art in Steam's own cache, or the CDN URL when the client hasn't cached it.
 /// Newer Steam clients keep art in `librarycache/<appid>/<hash>/file`, so look one level deeper too.
 pub fn art(root: &Path, id: &str, file: &str) -> String {
