@@ -164,8 +164,13 @@ async function onDM(ev) {
   if (text.startsWith('{"pl":"' + CTRL)) { try { ctrl = JSON.parse(text); } catch {} }
   if (ctrl) {
     // voice call signaling
-    if (['call', 'ans', 'decl', 'busy', 'end'].includes(ctrl.t)) {
+    if (['call', 'ans', 'decl', 'busy', 'end', 'move'].includes(ctrl.t)) {
       if (!mine) onCallSignal(other, ctrl, ev.created_at);
+      return;
+    }
+    // groups: chat, membership and the voice room
+    if (GROUP_CTRL.includes(ctrl.t)) {
+      if (!mine) onGroupCtrl(other, ctrl, ev.created_at);
       return;
     }
     if (ctrl.t === 'fr' && !mine) {
@@ -243,7 +248,7 @@ function unreadOf(pk) {
 }
 function socialUnread() {
   if (!acct()?.sk) return 0;
-  return friendPks().reduce((n, pk) => n + unreadOf(pk), 0) + acct().requests.length;
+  return friendPks().reduce((n, pk) => n + unreadOf(pk), 0) + acct().requests.length + groups().reduce((n, g) => n + groupUnread(g), 0);
 }
 function updateDot() {
   $('#friendsDot')?.classList.toggle('hidden', !socialUnread());
@@ -303,6 +308,7 @@ function openSocial() {
 }
 function closeSocial() {
   social.open = false;
+  setTimeout(() => { roomUI(); if (inCall()) callUI(); }, 0);
   $('#social').classList.remove('show');
   setTimeout(() => !social.open && $('#social').classList.add('hidden'), 300);
   document.activeElement?.blur();
@@ -324,8 +330,12 @@ function avatar(pk, name, cls = '') {
 function listItems() {
   const a = acct();
   if (!a?.sk) return [];
-  const items = [{ k: 'me' }, { k: 'find' }];
+  const items = [{ k: 'me' }, { k: 'find' }, { k: 'newgroup' }];
   a.requests.forEach((r) => items.push({ k: 'req', pk: r.pk }));
+  // groups with someone in voice or unread messages first
+  const lastAt = (g) => Math.max(g.created || 0, g.history.at(-1)?.at || 0);
+  [...groups()].sort((x, y) => inRoom(y.id).length - inRoom(x.id).length || groupUnread(y) - groupUnread(x) || lastAt(y) - lastAt(x))
+    .forEach((g) => items.push({ k: 'group', gid: g.id }));
   const fr = [...a.friends].sort((x, y) => presenceOf(y.pk).online - presenceOf(x.pk).online || unreadOf(y.pk) - unreadOf(x.pk) || x.name.localeCompare(y.name));
   fr.forEach((f) => items.push({ k: 'friend', pk: f.pk }));
   return items;
@@ -344,6 +354,15 @@ function renderSocial() {
     const active = it.pk && it.pk === social.chat ? ' active' : '';
     if (it.k === 'me') return `<div class="sitem me${f}" data-i="${i}">${avatar(me.pk, a.name, 'big')}<div><div class="t">${esc(a.name)}</div><div class="d">Мой профиль · код ${shortCode(me.pk)}</div></div></div>`;
     if (it.k === 'find') return `<div class="sitem find${f}" data-i="${i}"><div class="sav plus">+</div><div><div class="t">Найти друзей</div><div class="d">по нику или коду</div></div></div>`;
+    if (it.k === 'newgroup') return `<div class="sitem find${f}" data-i="${i}"><div class="sav plus">👥</div><div><div class="t">Создать группу</div><div class="d">чат и голосовой для 3–5 друзей</div></div></div>`;
+    if (it.k === 'group') {
+      const g = groupById(it.gid);
+      const live = inRoom(g.id);
+      const u = groupUnread(g);
+      const act = social.chat === 'g:' + g.id ? ' active' : '';
+      return `<div class="sitem${f}${act}" data-i="${i}">${groupAvatar(g)}
+        <div class="sbody"><div class="t">${esc(groupTitle(g))}</div><div class="d ${live.length ? 'game' : ''}">${live.length ? `🔊 в голосовом: ${live.length}` : `${g.members.length} ${plural(g.members.length, 'участник', 'участника', 'участников')}`}</div></div>${u ? `<b class="badge">${u}</b>` : ''}</div>`;
+    }
     if (it.k === 'req') {
       const r = a.requests.find((x) => x.pk === it.pk);
       return `<div class="sitem req${f}" data-i="${i}">${avatar(it.pk, r.name)}<div><div class="t">${esc(r.name)}</div><div class="d accent">Заявка в друзья</div></div></div>`;
@@ -355,11 +374,24 @@ function renderSocial() {
   };
   const firstFriend = items.findIndex((x) => x.k === 'friend');
   const firstReq = items.findIndex((x) => x.k === 'req');
-  const listHTML = items.map((it, i) => (i === firstReq ? '<div class="shead">Заявки</div>' : '') + (i === firstFriend ? `<div class="shead">Друзья · ${a.friends.filter((f) => presenceOf(f.pk).online).length} в сети</div>` : '') + itemHTML(it, i)).join('')
+  const firstGroup = items.findIndex((x) => x.k === 'group');
+  const listHTML = items.map((it, i) => (i === firstReq ? '<div class="shead">Заявки</div>' : '') + (i === firstGroup ? '<div class="shead">Группы</div>' : '') + (i === firstFriend ? `<div class="shead">Друзья · ${a.friends.filter((f) => presenceOf(f.pk).online).length} в сети</div>` : '') + itemHTML(it, i)).join('')
     + (a.friends.length ? '' : '<div class="sempty">Пока нет друзей — найдите их по нику</div>');
 
   let right = `<div class="schat-empty">${CC_ICONS.chat}<div>Выберите друга, чтобы начать чат</div></div>`;
-  if (social.chat) {
+  const chatGroup = social.chat?.startsWith('g:') ? groupById(social.chat.slice(2)) : null;
+  if (social.chat?.startsWith('g:') && !chatGroup) social.chat = null;
+  if (chatGroup) {
+    right = groupChatHTML(chatGroup) + `
+      <div class="emoji-tray hidden" id="emojiTray">${QUICK_EMOJI.map((e) => `<button>${e}</button>`).join('')}</div>
+      <div class="sinput">
+        <div class="sfield ${social.zone === 'chat' && social.chatFocus === 0 ? 'focus' : ''}">
+          <button class="emo-btn" id="sEmoji" title="Эмодзи">😊</button>
+          <input id="sInput" placeholder="Сообщение в «${esc(groupTitle(chatGroup))}»" maxlength="1000" value="${esc(social.draft || '')}"/>
+        </div>
+        <button class="sendbtn ${social.zone === 'chat' && social.chatFocus === 1 ? 'focus' : ''}" id="sSend" title="Отправить">${SEND_ICON}</button>
+      </div>`;
+  } else if (social.chat) {
     const pk = social.chat;
     const p = presenceOf(pk);
     const msgs = a.history[pk] || [];
@@ -394,8 +426,11 @@ function renderSocial() {
     inp.oninput = () => (social.draft = inp.value);
     inp.onfocus = () => { social.zone = 'chat'; social.chatFocus = 0; };
     $('#sSend').onclick = sendCurrent;
-    if ($('#sCall')) $('#sCall').onclick = () => startCall(social.chat);
-    if ($('.vstage')) bindCallButtons($('.vstage'));
+    if (chatGroup) bindGroupChat(chatGroup);
+    else {
+      if ($('#sCall')) $('#sCall').onclick = () => startCall(social.chat);
+      if ($('.vstage')) bindCallButtons($('.vstage'));
+    }
     $('#sEmoji').onclick = () => $('#emojiTray').classList.toggle('hidden');
     $$('#emojiTray button').forEach((b) => (b.onclick = () => {
       inp.value += b.textContent;
@@ -411,7 +446,7 @@ function renderSocial() {
 // Discord-style: consecutive messages from one person within a few minutes share one header
 const QUICK_EMOJI = ['😂', '🔥', '👍', '❤️', '😎', '🎮', '🏆', '😭', '🤝', '💀', '🙏', '👀'];
 const SEND_ICON = '<svg viewBox="0 0 24 24"><path d="M3.4 20.4 20.9 12 3.4 3.6 3.4 10l12.5 2-12.5 2z"/></svg>';
-function messageGroups(msgs) {
+function messageGroups(msgs, nameFn) {
   const out = [];
   let g = null;
   for (const m of msgs) {
@@ -429,7 +464,7 @@ function messageGroups(msgs) {
   return out.map((g) => {
     if (typeof g === 'string') return g;
     const mine = g.from === me.pk;
-    const name = mine ? acct().name : nameOf(g.from);
+    const name = mine ? acct().name : nameFn ? nameFn(g.from) : nameOf(g.from);
     return `<div class="mgroup ${mine ? 'mine' : ''}">
       <div class="mav">${avatar(g.from, name)}</div>
       <div class="mcol"><div class="mhead"><b>${esc(name)}</b><span>${time(g.lines[0].at)}</span></div>
@@ -467,12 +502,15 @@ function activateItem() {
   if (it.k === 'me') return openProfileModal();
   if (it.k === 'find') return openFindModal();
   if (it.k === 'req') return openRequestModal(it.pk);
-  social.chat = it.pk;
+  if (it.k === 'newgroup') return openCreateGroup();
+  social.chat = it.k === 'group' ? 'g:' + it.gid : it.pk;
   social.zone = 'chat';
   social.chatFocus = 0;
   social.draft = '';
-  markRead(it.pk);
+  if (it.k === 'group') markGroupRead(groupById(it.gid));
+  else markRead(it.pk);
   renderSocial();
+  roomUI();
 }
 
 async function sendCurrent() {
@@ -482,6 +520,7 @@ async function sendCurrent() {
   social.draft = '';
   inp.value = '';
   sfx.ok();
+  if (social.chat.startsWith('g:')) return sendGroupMessage(groupById(social.chat.slice(2)), text);
   await sendDM(social.chat, text);
   markRead(social.chat);
   renderSocial();
@@ -513,6 +552,7 @@ function socialHandle(act, src) {
     else if (act === 'menu') {
       const it = listItems()[social.idx];
       if (it?.k === 'friend') return openFriendMenu(it.pk);
+      if (it?.k === 'group') return openGroupMenu(groupById(it.gid));
     }
     return renderSocial();
   }
@@ -520,7 +560,13 @@ function socialHandle(act, src) {
   // chat
   const m = $('#smsgs');
   if (act === 'back') { sfx.back(); social.zone = 'list'; document.activeElement?.blur(); return renderSocial(); }
-  if (act === 'menu') return inCall() && call.pk === social.chat ? openCallMenu() : startCall(social.chat);
+  if (act === 'menu') {
+    if (social.chat.startsWith('g:')) {
+      const gid = social.chat.slice(2);
+      return room.gid === gid ? openGroupMenu(groupById(gid)) : joinRoom(gid);
+    }
+    return inCall() && call.pk === social.chat ? openCallMenu() : startCall(social.chat);
+  }
   if (act === 'up' || act === 'down') { m?.scrollBy({ top: act === 'down' ? 140 : -140, behavior: 'smooth' }); return; }
   if (act === 'left') {
     if (social.chatFocus === 1) social.chatFocus = 0;

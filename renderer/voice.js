@@ -89,9 +89,9 @@ function callAction(a) {
   else if (a === 'deafen') toggleDeafen();
   else if (a === 'menu') openCallMenu();
   else if (a === 'hangup') hangUp();
-  else if (a === 'opencall') openCallChat();
-  else if (a === 'accept') acceptCall();
-  else if (a === 'decline') declineCall();
+  else if (a === 'opencall') room.gid ? openGroupChat(room.gid) : openCallChat();
+  else if (a === 'accept') groupRingOpen() ? acceptGroupRing() : acceptCall();
+  else if (a === 'decline') groupRingOpen() ? stopGroupRing() : declineCall();
 }
 
 // open the chat with the person we're talking to — its header shows the full call stage
@@ -142,10 +142,15 @@ function tickWait() {
 setInterval(tickWait, 500);
 
 function pushOverlay() {
+  // a group voice room drives the overlay on its own
+  if (room.gid && call.state === 'idle') return;
   ipc.overlaySend({
     type: 'call', state: call.state, key: call.pk, name: call.pk ? nameOf(call.pk) : '',
-    selfKey: me?.pk, selfName: acct()?.name || '',
-    startedAt: call.startedAt, muted: call.muted, deafened: call.deafened, remote: call.remote
+    startedAt: call.startedAt,
+    participants: call.pk ? [
+      { key: me?.pk, name: acct()?.name || 'Вы', muted: call.muted, deafened: call.deafened, self: true },
+      ...(call.state === 'active' ? [{ key: call.pk, name: nameOf(call.pk), ...call.remote }] : [])
+    ] : []
   });
 }
 
@@ -186,7 +191,7 @@ function watchLevels() {
     $('#cRemoteAv')?.classList.toggle('speaking', r);
     $('#vt-remote')?.classList.toggle('speaking', r);
     $('#vt-self')?.classList.toggle('speaking', s);
-    ipc.overlaySend({ type: 'speaking', remote: r, self: s });
+    ipc.overlaySend({ type: 'speaking', map: { [me.pk]: s, [call.pk]: r } });
   }, 120);
 }
 
@@ -291,6 +296,10 @@ function onCallSignal(from, ctrl, createdAt) {
     call.pc.setRemoteDescription({ type: 'answer', sdp: ctrl.sdp }).catch(() => hangUp());
     const pc = call.pc;
     call.timers.push(setTimeout(() => connectTimeout(pc), 25000));
+  } else if (ctrl.t === 'move') {
+    // the other side added someone: the call continues in a group voice room
+    endLocal();
+    followMove(ctrl.gid);
   } else if (ctrl.t === 'decl') endLocal(`${nameOf(from)} отклонил(а) звонок`);
   else if (ctrl.t === 'busy') endLocal(`${nameOf(from)} сейчас в другом звонке`);
   else if (ctrl.t === 'end') endLocal(call.state === 'incoming' ? `Пропущенный звонок от ${nameOf(from)}` : 'Звонок завершён');
@@ -414,6 +423,7 @@ async function openCallMenu(focus = 0) {
     ['vol', `Громкость ${call.pk ? nameOf(call.pk) : 'собеседника'}`, `${v.volume}%`],
     ['mic', 'Микрофон', micName.replace(/^По умолчанию - |^Default - /, '')],
     ['noise', 'Шумоподавление', v.noise ? 'Вкл' : 'Выкл'],
+    ...(call.state === 'active' ? [['add', 'Добавить друга в звонок', 'станет группой']] : []),
     ['hangup', 'Завершить звонок', '', 'danger']
   ];
   callMenuOpen = true;
@@ -431,6 +441,7 @@ async function openCallMenu(focus = 0) {
       await switchMic(mics[(cur + 1) % mics.length].deviceId);
     }
     if (id === 'hangup') { closeCallMenu(); return hangUp(); }
+    if (id === 'add') { callMenuOpen = false; return openAddToCall(); }
     if (inCall()) openCallMenu(i);
   }));
 }

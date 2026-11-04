@@ -1163,6 +1163,7 @@ function handle(act, src) {
   }
   if (osk.open) return oskHandle(act);
   if (callCardOpen()) return callHandle(act);
+  if (groupRingOpen()) return groupRingHandle(act);
   if (act === 'lb') return;
   if (act === 'start') act = 'menu';
   if (modal.open) return modalHandle(act, src);

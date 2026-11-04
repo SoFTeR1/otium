@@ -14,7 +14,7 @@ const ICON = {
   headOff: '<svg viewBox="0 0 24 24"><path d="M3.3 2 2 3.3l2.6 2.6A9 9 0 0 0 3 12v7a2 2 0 0 0 2 2h3v-8H5v-1c0-1.2.3-2.4.9-3.4L19 21.7l1.3-1.3zM12 3c-1.7 0-3.3.5-4.7 1.3l1.5 1.5A7 7 0 0 1 19 12v1h-3v.2l5 5V12a9 9 0 0 0-9-9z"/></svg>'
 };
 
-const st = { focused: true, call: null, speaking: { remote: false, self: false }, toasts: [] };
+const st = { focused: true, call: null, speakingMap: {}, toasts: [] };
 
 // ---------- click-through except over buttons ----------
 let interactive = false;
@@ -39,7 +39,7 @@ function renderCall() {
   if (incoming) {
     $('#incoming').innerHTML = `<div class="card">
       <div class="top"><div class="av" style="${grad(c.key)}">${esc(c.name[0].toUpperCase())}</div>
-        <div><div class="k">Входящий звонок</div><div class="n">${esc(c.name)}</div></div></div>
+        <div><div class="k">${esc(c.kicker || 'Входящий звонок')}</div><div class="n">${esc(c.name)}</div></div></div>
       <div class="row"><button class="btn yes" data-a="accept">${ICON.phone}Принять</button><button class="btn no" data-a="decline">${ICON.hang}Отклонить</button></div>
       <div class="hint">или кнопка Xbox на геймпаде</div></div>`;
   }
@@ -48,14 +48,13 @@ function renderCall() {
     // controlled from the launcher; this stays fully click-through.
     const status = { outgoing: 'Звоним…', connecting: 'Соединяем…' }[c.state];
     const icons = (p) => (p?.deafened ? ICON.headOff + ICON.micOff : p?.muted ? ICON.micOff : '');
-    const row = (key, name, speaking, p, cls) => `<div class="vrow">
-      <div class="vav ${speaking ? 'speaking' : ''}" data-who="${cls}" style="${grad(key)}">${esc((name || '?')[0].toUpperCase())}</div>
-      <div class="vname ${p?.deafened ? 'dim' : ''}">${esc(name)}${icons(p)}</div></div>`;
+    const row = (p) => `<div class="vrow">
+      <div class="vav ${st.speakingMap[p.key] ? 'speaking' : ''}" data-key="${esc(p.key)}" style="${grad(p.key)}">${esc((p.name || '?')[0].toUpperCase())}</div>
+      <div class="vname ${p.deafened ? 'dim' : ''}">${esc(p.name)}${icons(p)}</div></div>`;
     // the whole widget is one button: hovering wakes it up, clicking opens the call in the launcher
     $('#voice').innerHTML = `<button class="vwrap" data-a="opencall">
-      <div class="vhead"><i></i>${status ? status : `Голосовой звонок <b id="timer">${timer(c.startedAt)}</b>`}</div>
-      ${row(c.selfKey || 'me', c.selfName || 'Вы', st.speaking.self, { muted: c.muted, deafened: c.deafened }, 'self')}
-      ${c.state === 'active' ? row(c.key, c.name, st.speaking.remote, c.remote, 'remote') : ''}
+      <div class="vhead"><i></i>${status ? status : `${c.title ? esc(c.title) : 'Голосовой звонок'} <b id="timer">${timer(c.startedAt)}</b>`}</div>
+      ${(c.participants || []).map(row).join('')}
       <div class="vopen">Открыть звонок в лаунчере ›</div></button>`;
   }
   document.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => window.overlay.action(b.dataset.a)));
@@ -96,8 +95,7 @@ window.overlay.onMessage((m) => {
   if (m.type === 'focus') { st.focused = m.focused; renderCall(); }
   else if (m.type === 'call') { st.call = m; renderCall(); }
   else if (m.type === 'speaking') {
-    st.speaking = m;
-    document.querySelector('#voice [data-who="remote"]')?.classList.toggle('speaking', !!m.remote);
-    document.querySelector('#voice [data-who="self"]')?.classList.toggle('speaking', !!m.self);
+    st.speakingMap = { ...st.speakingMap, ...(m.map || {}) };
+    for (const [k, on] of Object.entries(m.map || {})) document.querySelector(`#voice [data-key="${CSS.escape(k)}"]`)?.classList.toggle('speaking', on);
   } else if (m.type === 'toast') showToast(m);
 });

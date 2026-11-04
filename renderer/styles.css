@@ -729,6 +729,23 @@ body.cc-open .toasts { bottom: 200px; }
 .callpill .g { width: 24px; height: 24px; border-color: rgba(255, 255, 255, 0.75); color: #fff; }
 .callpill .g.xb { background: rgba(0, 0, 0, 0.25); }
 
+/* ---------- Groups ---------- */
+.sav.gav { border-radius: 14px; }
+.sav.gav.big { border-radius: 26px; }
+.gmembers { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vlive { margin: 10px 16px 0; padding: 10px 14px; border-radius: 12px; background: rgba(91, 227, 138, 0.1); color: #7cf0a4; font-size: 14px; }
+.vtiles { flex-wrap: wrap; }
+.vtile.pending { opacity: 0.6; }
+.vpending { font-size: 11px; color: var(--dim); margin-top: 4px; }
+.roompill { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 70; }
+.roompill.hidden { display: none; }
+.roompill .call-pill { border-color: rgba(79, 163, 255, 0.4); }
+.rp-open { display: flex; align-items: center; gap: 12px; text-align: left; padding-right: 6px; }
+.rp-open .sav { width: 40px; height: 40px; font-size: 17px; }
+.rp-open .t { font-size: 14px; font-weight: 600; }
+.rp-open .d { font-size: 12px; color: #8fc2ff; }
+.sitem .sav.plus { font-size: 20px; }
+
 /* wallpaper list */
 .wp-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .wp { position: relative; width: 150px; height: 86px; border-radius: 10px; background: #2a3042 center / cover no-repeat; font-size: 28px; }

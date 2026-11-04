@@ -175,6 +175,14 @@ function renderCC() {
   const items = [];
   if (g) items.push({ cls: 'wide game', html: `<div class="ccimg" style="background-image:${g.cover ? esc(cssUrl(g.cover)) : 'none'}"></div><div><div class="d">Сейчас запущено</div><div class="t">${esc(g.name)}</div><div class="d">Вернуться в игру</div></div>`, ok: backToGame });
   else if (cc.canReturn) items.push({ cls: 'home', html: `${CC_ICONS.back}<div class="d">Вернуться</div>`, ok: backToGame });
+  if (room.gid) {
+    const g = groupById(room.gid);
+    const ic = (s) => s.replace('<svg', '<svg class="ci"');
+    items.push({ cls: 'wide game', html: `<div class="ccimg call-ic">🔊</div><div><div class="d">Голосовой · ${roomParticipants().length}</div><div class="t">${esc(groupTitle(g))}</div><div class="d">открыть группу</div></div>`, ok: () => { closeCC(); openGroupChat(g.id); } });
+    items.push({ cls: 'ctl' + (room.muted ? ' off' : ''), html: ic(room.muted ? CALL_ICONS.micOff : CALL_ICONS.mic), ok: () => { roomToggleMic(); renderCC(); } });
+    items.push({ cls: 'ctl' + (room.deafened ? ' off' : ''), html: ic(room.deafened ? CALL_ICONS.headOff : CALL_ICONS.head), ok: () => { roomToggleDeafen(); renderCC(); } });
+    items.push({ cls: 'ctl hangup', html: ic(CALL_ICONS.hang), ok: () => { leaveRoom(); renderCC(); } });
+  }
   if (inCall() && call.state === 'active') {
     items.push({ cls: 'wide game', html: `<div class="ccimg call-ic">${CALL_ICONS.phone}</div><div><div class="d">Звонок</div><div class="t">${esc(nameOf(call.pk))}</div><div class="d">${call.muted ? 'микрофон выключен' : 'микрофон включён'}</div></div>`, ok: () => { toggleMic(); renderCC(); } });
     const ic = (s) => s.replace('<svg', '<svg class="ci"');
