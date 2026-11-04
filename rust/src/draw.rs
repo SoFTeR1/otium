@@ -23,12 +23,23 @@ pub fn bold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("bold".into()))
 }
 
-/// Returns the texture once it has finished loading (URLs load in the background).
-pub fn texture(ctx: &egui::Context, uri: &str) -> Option<SizedTexture> {
-    match ctx.try_load_texture(uri, TEX, SizeHint::default()) {
-        Ok(egui::load::TexturePoll::Ready { texture }) => Some(texture),
-        _ => None,
+/// The first candidate that has loaded. Candidates that failed (404, missing file) are skipped;
+/// one still loading stops the search, so a better image isn't replaced by a fallback for a frame.
+pub fn texture(ctx: &egui::Context, uris: &[String]) -> Option<SizedTexture> {
+    for uri in uris {
+        match ctx.try_load_texture(uri, TEX, SizeHint::default()) {
+            Ok(egui::load::TexturePoll::Ready { texture }) => return Some(texture),
+            Ok(egui::load::TexturePoll::Pending { .. }) => return None,
+            Err(_) => continue,
+        }
     }
+    None
+}
+
+/// True when every candidate has failed, so the caller should draw a placeholder.
+#[allow(dead_code)]
+pub fn all_failed(ctx: &egui::Context, uris: &[String]) -> bool {
+    uris.iter().all(|u| ctx.try_load_texture(u, TEX, SizeHint::default()).is_err())
 }
 
 /// UV rect that crops a texture to fill `rect` without stretching (CSS `object-fit: cover`).
@@ -51,8 +62,8 @@ pub fn cover_uv(tex: Vec2Like, rect: Rect, focus: (f32, f32)) -> Rect {
 pub type Vec2Like = (f32, f32);
 
 /// Paints an image cropped to fill `rect`. Returns false while it is still loading.
-pub fn cover(ui: &Ui, uri: &str, rect: Rect, radius: f32, tint: Color32, focus: (f32, f32)) -> bool {
-    let Some(tex) = texture(ui.ctx(), uri) else { return false };
+pub fn cover(ui: &Ui, uris: &[String], rect: Rect, radius: f32, tint: Color32, focus: (f32, f32)) -> bool {
+    let Some(tex) = texture(ui.ctx(), uris) else { return false };
     let uv = cover_uv((tex.size.x, tex.size.y), rect, focus);
     egui::Image::from_texture(tex)
         .uv(uv)
@@ -63,8 +74,8 @@ pub fn cover(ui: &Ui, uri: &str, rect: Rect, radius: f32, tint: Color32, focus: 
 }
 
 /// Paints an image scaled down to fit inside `rect`, anchored bottom-left. Returns the painted rect.
-pub fn contain_left(ui: &Ui, uri: &str, rect: Rect, tint: Color32) -> Option<Rect> {
-    let tex = texture(ui.ctx(), uri)?;
+pub fn contain_left(ui: &Ui, uris: &[String], rect: Rect, tint: Color32) -> Option<Rect> {
+    let tex = texture(ui.ctx(), uris)?;
     let scale = (rect.width() / tex.size.x).min(rect.height() / tex.size.y);
     let size = tex.size * scale;
     let r = Rect::from_min_size(pos2(rect.left(), rect.bottom() - size.y), size);

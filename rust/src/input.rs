@@ -78,7 +78,7 @@ impl Input {
                 (Insert, Nav::Add),
                 (Home, Nav::Guide),
             ] {
-                if i.key_pressed(key) {
+                if key_pressed(i, key) {
                     out.push(nav);
                 }
             }
@@ -134,6 +134,17 @@ impl Input {
         }
         out
     }
+}
+
+/// A key press by its position on the keyboard, so letter shortcuts work in any layout
+/// (with the Russian layout N types "т" and `Key::N` alone never fires).
+pub fn key_pressed(i: &egui::InputState, key: egui::Key) -> bool {
+    i.events.iter().any(|e| match e {
+        egui::Event::Key { key: k, physical_key, pressed: true, modifiers, .. } => {
+            (*k == key || *physical_key == Some(key)) && !modifiers.ctrl && !modifiers.alt
+        }
+        _ => false,
+    })
 }
 
 fn button_nav(b: Button) -> Option<Nav> {

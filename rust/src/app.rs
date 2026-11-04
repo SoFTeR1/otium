@@ -1,9 +1,14 @@
-//! The shell: splash, then the home screen with the game row, background art and Play button.
+//! The shell: splash, then the home screen with the game row, background art and Play button,
+//! plus the Add / Steam import / Options menus on top of it.
 
 use crate::data::{image_uri, Game, Library};
 use crate::draw::{self, black, bold, font, semibold, white};
 use crate::input::{Input, Nav, PadKind};
+use crate::modal::{Action, Modal};
+use crate::steam::{self, LocalStat};
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect, Stroke, StrokeKind};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -19,21 +24,36 @@ struct Toast {
     at: Instant,
 }
 
+/// Image candidates for one game, best first; failed ones are skipped when painting.
+#[derive(Default, Clone)]
+struct Art {
+    covers: Vec<String>,
+    backgrounds: Vec<String>,
+    logos: Vec<String>,
+}
+
 pub struct App {
     lib: Library,
     games: Vec<Game>,
+    art: HashMap<String, Art>,
+    steam_root: Option<PathBuf>,
+    steam_stats: HashMap<String, LocalStat>,
     input: Input,
     sel: usize,
     zone: Zone,
     scroll: f32,
+    modal: Option<Modal>,
+    modal_at: Instant,
     /// background of the previous game, faded out under the new one
-    bg_prev: Option<String>,
+    bg_prev: Vec<String>,
     bg_changed: Instant,
     splash_start: Option<Instant>,
     toast: Option<Toast>,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
+    backed_up: bool,
+    refocus: bool,
 }
 
 impl App {
@@ -46,52 +66,229 @@ impl App {
         cc.egui_ctx.set_style(style);
 
         let lib = Library::load();
-        let games = lib.sorted_games();
         let splash = lib.setting_bool("splash", true);
         let fullscreen = lib.setting_bool("fullscreen", true);
-        Self {
-            games,
+        let (_, steam_stats) = steam::local_stats();
+        let mut app = Self {
+            games: Vec::new(),
+            art: HashMap::new(),
+            steam_root: steam::root(),
+            steam_stats,
             input: Input::new(),
             sel: 0,
             zone: Zone::Row,
             scroll: 0.0,
-            bg_prev: None,
+            modal: None,
+            modal_at: Instant::now(),
+            bg_prev: Vec::new(),
             bg_changed: Instant::now() - Duration::from_secs(5),
             splash_start: splash.then(Instant::now),
             toast: None,
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
+            backed_up: false,
+            refocus: false,
             lib,
+        };
+        app.refresh(None);
+        app
+    }
+
+    /// Re-sorts the row after the library changed, keeping `keep` (a game id) selected.
+    fn refresh(&mut self, keep: Option<&str>) {
+        let keep = keep.map(str::to_string).or_else(|| self.games.get(self.sel).map(|g| g.id.clone()));
+        self.games = self.lib.sorted_games();
+        let root = self.steam_root.as_deref();
+        self.art = self.games.iter().map(|g| (g.id.clone(), art_for(g, root))).collect();
+        self.sel = keep
+            .and_then(|id| self.games.iter().position(|g| g.id == id))
+            .unwrap_or(self.sel)
+            .min(self.games.len().saturating_sub(1));
+        self.scroll = self.scroll.min(self.games.len() as f32);
+        if self.games.is_empty() {
+            self.zone = Zone::Row;
         }
+    }
+
+    /// Writes library.json; the first write of a session keeps a copy of what was there before.
+    fn save(&mut self) {
+        if !self.backed_up {
+            let file = Library::file();
+            if file.exists() {
+                let _ = std::fs::copy(&file, file.with_file_name("library.before-rust.json"));
+            }
+            self.backed_up = true;
+        }
+        if let Err(e) = self.lib.save() {
+            self.toast(&format!("Не удалось сохранить библиотеку: {e}"), true);
+        }
+    }
+
+    fn art(&self, g: &Game) -> Art {
+        self.art.get(&g.id).cloned().unwrap_or_default()
     }
 
     fn select(&mut self, i: usize) {
         if i == self.sel || i >= self.games.len() {
             return;
         }
-        self.bg_prev = self.games.get(self.sel).and_then(background_of);
+        self.bg_prev = self.games.get(self.sel).map(|g| self.art(g).backgrounds).unwrap_or_default();
         self.bg_changed = Instant::now();
         self.sel = i;
     }
 
-    fn handle(&mut self, nav: Nav) {
+    fn open(&mut self, m: Modal) {
+        self.modal = Some(m);
+        self.modal_at = Instant::now();
+    }
+
+    fn handle(&mut self, nav: Nav, frame: &eframe::Frame) {
+        if let Some(m) = self.modal.as_mut() {
+            let action = m.handle(nav);
+            self.apply(action, frame);
+            return;
+        }
         let n = self.games.len();
         match (self.zone, nav) {
             (Zone::Row, Nav::Left) if self.sel > 0 => self.select(self.sel - 1),
             (Zone::Row, Nav::Right) if self.sel + 1 < n => self.select(self.sel + 1),
             (Zone::Row, Nav::Down) if n > 0 => self.zone = Zone::Play,
-            (Zone::Row, Nav::Ok) => self.launch_selected(),
+            (Zone::Row, Nav::Ok) if n > 0 => self.launch_selected(),
+            (Zone::Row, Nav::Ok) => self.open(Modal::Add { focus: 0 }),
             (Zone::Play, Nav::Ok) => self.launch_selected(),
             (Zone::Play, Nav::Right) => self.zone = Zone::More,
             (Zone::More, Nav::Left) => self.zone = Zone::Play,
             (Zone::Play | Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
             (Zone::More, Nav::Ok) | (_, Nav::Options) => {
-                self.toast("Параметры игры появятся в следующей сборке", false)
+                if let Some(g) = self.games.get(self.sel) {
+                    let game = g.name.clone();
+                    self.open(Modal::Options { focus: 0, game });
+                }
             }
-            (_, Nav::Add) => self.toast("Добавление игр появится в следующей сборке", false),
+            (_, Nav::Add) => self.open(Modal::Add { focus: 0 }),
             _ => {}
         }
+    }
+
+    fn apply(&mut self, action: Action, frame: &eframe::Frame) {
+        match action {
+            Action::None => {}
+            Action::Close => self.modal = None,
+            Action::OpenImport => self.open_import(),
+            Action::PickFile => {
+                self.modal = None;
+                self.pick_file(frame);
+            }
+            Action::Import(list) => {
+                self.modal = None;
+                self.import(list);
+            }
+            Action::Play => {
+                self.modal = None;
+                self.launch_selected();
+            }
+            Action::MakeFirst => {
+                self.modal = None;
+                self.make_first();
+            }
+            Action::AskDelete => {
+                let game = self.games.get(self.sel).map(|g| g.name.clone()).unwrap_or_default();
+                self.open(Modal::ConfirmDelete { focus: 0, game });
+            }
+            Action::Delete => {
+                self.modal = None;
+                self.delete_selected();
+            }
+        }
+    }
+
+    fn open_import(&mut self) {
+        match steam::scan() {
+            Err(e) => self.open(Modal::Message { title: "Steam".into(), text: e }),
+            Ok(found) => {
+                let have: HashSet<String> = self.lib.games.iter().filter_map(Game::steam_app_id).collect();
+                let fresh: Vec<_> = found.into_iter().filter(|g| !have.contains(&g.app_id)).collect();
+                if fresh.is_empty() {
+                    self.open(Modal::Message {
+                        title: "Steam".into(),
+                        text: "Все установленные игры Steam уже в библиотеке.".into(),
+                    });
+                } else {
+                    self.open(Modal::import(fresh));
+                }
+            }
+        }
+    }
+
+    fn import(&mut self, list: Vec<steam::SteamGame>) {
+        if list.is_empty() {
+            self.toast("Ничего не выбрано", false);
+            return;
+        }
+        let now = now_ms();
+        let first = Game::from_steam(&list[0], now);
+        let first_id = first.id.clone();
+        self.lib.games.push(first);
+        for (i, g) in list.iter().enumerate().skip(1) {
+            self.lib.games.push(Game::from_steam(g, now - i as f64));
+        }
+        self.save();
+        self.refresh(Some(&first_id));
+        let n = list.len();
+        self.toast(&format!("Добавлено в библиотеку: {n} {}", plural(n, "игра", "игры", "игр")), false);
+    }
+
+    fn pick_file(&mut self, frame: &eframe::Frame) {
+        let picked = rfd::FileDialog::new()
+            .set_title("Выберите игру или приложение")
+            .add_filter("Игры и ярлыки", &["exe", "lnk", "url", "bat", "cmd"])
+            .set_parent(frame)
+            .pick_file();
+        // the dialog takes focus; bring the shell back to the front on the next frame
+        self.refocus = true;
+        let Some(path) = picked else { return };
+        let path_str = path.to_string_lossy().to_string();
+        if self.lib.games.iter().any(|g| g.path.eq_ignore_ascii_case(&path_str)) {
+            self.toast("Эта игра уже в библиотеке", false);
+            return;
+        }
+        let name = name_from_path(&path);
+        let game = Game::new(&name, &path_str);
+        let id = game.id.clone();
+        self.lib.games.push(game);
+        self.save();
+        self.refresh(Some(&id));
+        self.toast(&format!("«{name}» добавлена в библиотеку"), false);
+    }
+
+    fn make_first(&mut self) {
+        let Some(id) = self.games.get(self.sel).map(|g| g.id.clone()) else { return };
+        // put the whole current order into `order`, then move this game in front of it
+        for (i, g) in self.games.iter().enumerate() {
+            if let Some(lg) = self.lib.games.iter_mut().find(|x| x.id == g.id) {
+                lg.order = Some(i as f64 + 1.0);
+            }
+        }
+        if let Some(lg) = self.lib.games.iter_mut().find(|x| x.id == id) {
+            lg.order = Some(0.0);
+        }
+        self.lib.settings.insert("sortMode".into(), "custom".into());
+        self.save();
+        self.refresh(Some(&id));
+        self.scroll = 0.0;
+        self.zone = Zone::Row;
+    }
+
+    fn delete_selected(&mut self) {
+        let Some(g) = self.games.get(self.sel).cloned() else { return };
+        self.lib.games.retain(|x| x.id != g.id);
+        self.save();
+        let next = self.games.get(self.sel + 1).or_else(|| self.sel.checked_sub(1).and_then(|i| self.games.get(i)));
+        let next = next.map(|x| x.id.clone());
+        self.refresh(next.as_deref());
+        self.zone = Zone::Row;
+        self.toast(&format!("«{}» удалена из библиотеки", g.name), false);
     }
 
     /// winit reports fullscreen but keeps the window at its initial size when fullscreen is
@@ -128,23 +325,89 @@ impl App {
     fn toast(&mut self, text: &str, error: bool) {
         self.toast = Some(Toast { text: text.into(), error, at: Instant::now() });
     }
+
+    /// Playtime in seconds: whichever is larger, ours or what the Steam client recorded.
+    fn playtime(&self, g: &Game) -> f64 {
+        let steam = g.steam_app_id().and_then(|id| self.steam_stats.get(&id)).map_or(0.0, |s| s.playtime);
+        g.playtime.unwrap_or(0.0).max(steam)
+    }
 }
 
-fn background_of(g: &Game) -> Option<String> {
-    g.hero.as_deref().or(g.cover.as_deref()).and_then(image_uri)
+fn art_for(g: &Game, root: Option<&std::path::Path>) -> Art {
+    // Art the user picked goes first. A plain Steam CDN link (what imports store) goes after Steam's
+    // own cache: the cache is local, always current, and some old CDN links now serve the wrong image.
+    fn merge(stored: Option<&str>, steam: Vec<String>) -> Vec<String> {
+        let stored = stored.filter(|s| !s.trim().is_empty());
+        let mut out = Vec::new();
+        match stored {
+            Some(s) if !s.starts_with(steam::CDN) => {
+                out.extend(image_uri(s));
+                out.extend(steam.iter().filter_map(|u| image_uri(u)));
+            }
+            Some(s) => {
+                out.extend(steam.iter().filter(|u| !u.starts_with("http")).filter_map(|u| image_uri(u)));
+                out.extend(image_uri(s));
+                out.extend(steam.iter().filter(|u| u.starts_with("http")).filter_map(|u| image_uri(u)));
+            }
+            None => out.extend(steam.iter().filter_map(|u| image_uri(u))),
+        }
+        out
+    }
+    let mut a = Art::default();
+    let id = g.steam_app_id();
+    let steam = |f: fn(Option<&std::path::Path>, &str) -> Vec<String>| id.as_deref().map(|id| f(root, id)).unwrap_or_default();
+    a.covers = merge(g.cover.as_deref(), steam(steam::cover_candidates));
+    a.backgrounds.extend(g.custom_background().and_then(image_uri));
+    a.backgrounds.extend(merge(g.hero.as_deref(), steam(steam::hero_candidates)));
+    a.backgrounds.extend(a.covers.iter().cloned());
+    a.logos = merge(g.logo.as_deref(), steam(steam::logo_candidates));
+    for list in [&mut a.covers, &mut a.backgrounds, &mut a.logos] {
+        let mut seen = HashSet::new();
+        list.retain(|u| seen.insert(u.to_lowercase()));
+    }
+    a
+}
+
+fn name_from_path(path: &std::path::Path) -> String {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let cleaned: String = stem.chars().map(|c| if matches!(c, '_' | '.' | '-') { ' ' } else { c }).collect();
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        "Игра".into()
+    } else {
+        cleaned
+    }
+}
+
+fn plural(n: usize, one: &'static str, few: &'static str, many: &'static str) -> &'static str {
+    match (n % 10, n % 100) {
+        (1, x) if x != 11 => one,
+        (2..=4, x) if !(12..=14).contains(&x) => few,
+        _ => many,
+    }
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0)
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(16));
         let navs = self.input.poll(ctx);
 
-        if ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+        if ctx.input(|i| crate::input::key_pressed(i, egui::Key::F11)) {
             self.fullscreen = !self.fullscreen;
             self.fs_tries = 0;
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
         }
         self.keep_fullscreen(ctx);
+        if std::mem::take(&mut self.refocus) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
 
         if let Some(start) = self.splash_start {
             let skip = !navs.is_empty() || ctx.input(|i| i.pointer.any_click());
@@ -154,7 +417,7 @@ impl eframe::App for App {
             }
         } else {
             for nav in navs {
-                self.handle(nav);
+                self.handle(nav, frame);
             }
         }
 
@@ -230,18 +493,34 @@ impl App {
 
         if self.games.is_empty() {
             let p = ui.painter();
-            p.text(rect.center() - vec2(0.0, 20.0 * s), Align2::CENTER_CENTER, "Библиотека пуста", semibold(40.0 * s), white(appear));
+            p.text(rect.center() - vec2(0.0, 30.0 * s), Align2::CENTER_CENTER, "Библиотека пуста", semibold(40.0 * s), white(appear));
+            let add = if self.input.pad_kind == PadKind::PlayStation { "□" } else { "X" };
             p.text(
-                rect.center() + vec2(0.0, 30.0 * s),
+                rect.center() + vec2(0.0, 24.0 * s),
                 Align2::CENTER_CENTER,
-                format!("OTIUM читает игры из {}", Library::file().display()),
-                font(20.0 * s),
-                white(0.6 * appear),
+                format!("Нажмите {add} или N, чтобы добавить игры"),
+                font(22.0 * s),
+                white(0.65 * appear),
             );
-            return;
+        } else {
+            self.paint_row(ui, rect, s, dt, appear);
         }
 
-        // ---- game row: the selected tile stays at the left edge, the rest scroll past it ----
+        let hints: Vec<(usize, &str)> = match &self.modal {
+            Some(m) => m.hints(),
+            None => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
+        };
+        self.paint_hints(ui, rect, s, &hints);
+
+        if let Some(m) = self.modal.as_mut() {
+            let a = ease_out((self.modal_at.elapsed().as_secs_f32() / 0.18).min(1.0));
+            m.paint(ui, rect, s, dt, a);
+        }
+        self.paint_toast(ui, rect, s);
+    }
+
+    fn paint_row(&mut self, ui: &egui::Ui, rect: Rect, s: f32, dt: f32, appear: f32) {
+        // the selected tile stays at the left edge, the rest scroll past it
         let tile = 116.0 * s;
         let big = 164.0 * s;
         let gap = 20.0 * s;
@@ -250,24 +529,25 @@ impl App {
         let k = 1.0 - (-dt * 16.0).exp();
         self.scroll += (self.sel as f32 - self.scroll) * k;
 
-        let in_row = self.zone == Zone::Row;
+        let in_row = self.zone == Zone::Row && self.modal.is_none();
         for (i, g) in self.games.iter().enumerate() {
             let d = i as f32 - self.scroll;
             // the selected slot is wider, so tiles after it shift right by the difference
-            let shift = (d.clamp(0.0, 1.0)) * (big - tile);
+            let shift = d.clamp(0.0, 1.0) * (big - tile);
             let x = left + d * (tile + gap) + shift;
             if x > rect.right() || x + big < rect.left() - big {
                 continue;
             }
-            let focus = 1.0 - (i as f32 - self.scroll).abs().min(1.0);
+            let focus = 1.0 - d.abs().min(1.0);
             let size = tile + (big - tile) * focus;
             let r = Rect::from_min_size(pos2(x, row_y), vec2(size, size));
             let fade = if d < -0.5 { (1.0 + d).max(0.0) } else { 1.0 } * appear;
-            paint_tile(ui, g, r, 14.0 * s, fade, i == self.sel && in_row, s);
+            let covers = self.art.get(&g.id).map(|a| a.covers.as_slice()).unwrap_or(&[]);
+            paint_tile(ui, g, covers, r, 14.0 * s, fade, i == self.sel && in_row, s);
         }
 
-        // name of the selected game sits to the right of its tile, PS5-style
         let g = &self.games[self.sel];
+        let art = self.art(g);
         if in_row {
             ui.painter().text(
                 pos2(left + big + gap + 4.0 * s, row_y + big + 6.0 * s),
@@ -281,14 +561,13 @@ impl App {
         // ---- title art, Play button, info ----
         let info_y = rect.height() * 0.50;
         let logo_box = Rect::from_min_size(pos2(left, info_y - 190.0 * s), vec2(560.0 * s, 180.0 * s));
-        let logo = g.logo.as_deref().and_then(image_uri);
-        let painted = logo.and_then(|u| draw::contain_left(ui, &u, logo_box, white(appear)));
-        if painted.is_none() {
+        if draw::contain_left(ui, &art.logos, logo_box, white(appear)).is_none() {
             ui.painter().text(logo_box.left_bottom(), Align2::LEFT_BOTTOM, &g.name, bold(64.0 * s), white(appear));
         }
 
         let btn = Rect::from_min_size(pos2(left, info_y + 20.0 * s), vec2(280.0 * s, 68.0 * s));
-        let play_focus = self.zone == Zone::Play;
+        let no_modal = self.modal.is_none();
+        let play_focus = self.zone == Zone::Play && no_modal;
         let p = ui.painter();
         if play_focus {
             draw::glow(p, btn, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
@@ -297,7 +576,7 @@ impl App {
         p.text(btn.center(), Align2::CENTER_CENTER, "Играть", semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
 
         let more = Rect::from_center_size(pos2(btn.right() + 24.0 * s + 34.0 * s, btn.center().y), vec2(68.0 * s, 68.0 * s));
-        let more_focus = self.zone == Zone::More;
+        let more_focus = self.zone == Zone::More && no_modal;
         if more_focus {
             draw::glow(p, more, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
         }
@@ -308,8 +587,9 @@ impl App {
         }
 
         let mut info = Vec::new();
-        if let Some(pt) = g.playtime.filter(|m| *m > 0.0) {
-            info.push(format_playtime(pt));
+        let secs = self.playtime(g);
+        if secs >= 60.0 {
+            info.push(format_playtime(secs));
         }
         if g.steam_app_id().is_some() {
             info.push("Steam".to_string());
@@ -319,24 +599,20 @@ impl App {
         if !info.is_empty() {
             p.text(pos2(left + 4.0 * s, btn.bottom() + 26.0 * s), Align2::LEFT_TOP, info.join("  ·  "), font(20.0 * s), white(0.7 * appear));
         }
-
-        self.paint_hints(ui, rect, s);
-        self.paint_toast(ui, rect, s);
     }
 
     fn paint_background(&self, ui: &egui::Ui, rect: Rect) {
         let p = ui.painter();
-        let cur = self.games.get(self.sel).and_then(background_of);
+        let cur = self.games.get(self.sel).map(|g| self.art(g).backgrounds).unwrap_or_default();
         let t = (self.bg_changed.elapsed().as_secs_f32() / 0.45).min(1.0);
         let dim = Color32::from_gray(150);
-        if t < 1.0 {
-            if let Some(prev) = &self.bg_prev {
-                draw::cover(ui, prev, rect, 0.0, dim, (0.5, 0.3));
-            }
+        if t < 1.0 && !self.bg_prev.is_empty() {
+            draw::cover(ui, &self.bg_prev, rect, 0.0, dim, (0.5, 0.3));
         }
-        if let Some(cur) = &cur {
-            let a = (ease_out(t) * 150.0) as u8;
-            draw::cover(ui, cur, rect, 0.0, Color32::from_rgba_unmultiplied(a, a, a, (ease_out(t) * 255.0) as u8), (0.5, 0.3));
+        if !cur.is_empty() {
+            let e = ease_out(t);
+            let a = (e * 150.0) as u8;
+            draw::cover(ui, &cur, rect, 0.0, Color32::from_rgba_unmultiplied(a, a, a, (e * 255.0) as u8), (0.5, 0.3));
         }
         // keep text readable: darken the top, the bottom and the left side
         let h = rect.height();
@@ -366,20 +642,16 @@ impl App {
         }
     }
 
-    fn paint_hints(&self, ui: &egui::Ui, rect: Rect, s: f32) {
-        let ps = self.input.pad_kind == PadKind::PlayStation;
-        let hints: [(&str, &str); 3] = if ps {
-            [("✕", "Выбрать"), ("○", "Назад"), ("△", "Параметры")]
-        } else {
-            [("A", "Выбрать"), ("B", "Назад"), ("Y", "Параметры")]
-        };
+    /// Hint bar: (button, label) where button 0 = confirm, 1 = back, 2 = options, 3 = add.
+    fn paint_hints(&self, ui: &egui::Ui, rect: Rect, s: f32, hints: &[(usize, &str)]) {
+        let glyphs: [&str; 4] = if self.input.pad_kind == PadKind::PlayStation { ["✕", "○", "△", "□"] } else { ["A", "B", "Y", "X"] };
         let p = ui.painter();
         let mut x = rect.right() - 96.0 * s;
         let y = rect.bottom() - 54.0 * s;
-        for (glyph, label) in hints.iter().rev() {
+        for (button, label) in hints.iter().rev() {
             let t = p.text(pos2(x, y), Align2::RIGHT_CENTER, *label, font(19.0 * s), white(0.75));
             let c = pos2(t.left() - 22.0 * s, y);
-            draw::pad_glyph(p, c, 14.0 * s, glyph, Color32::WHITE);
+            draw::pad_glyph(p, c, 14.0 * s, glyphs[*button], Color32::WHITE);
             x = c.x - 40.0 * s;
         }
     }
@@ -403,7 +675,8 @@ impl App {
     }
 }
 
-fn paint_tile(ui: &egui::Ui, g: &Game, r: Rect, radius: f32, alpha: f32, focused: bool, s: f32) {
+#[allow(clippy::too_many_arguments)]
+fn paint_tile(ui: &egui::Ui, g: &Game, covers: &[String], r: Rect, radius: f32, alpha: f32, focused: bool, s: f32) {
     if alpha <= 0.01 {
         return;
     }
@@ -411,10 +684,7 @@ fn paint_tile(ui: &egui::Ui, g: &Game, r: Rect, radius: f32, alpha: f32, focused
     if focused {
         draw::glow(p, r, radius, Color32::WHITE, 16.0 * s, 0.55 * alpha);
     }
-    let tint = white(alpha);
-    let art = g.cover.as_deref().or(g.hero.as_deref()).and_then(image_uri);
-    let ok = art.is_some_and(|u| draw::cover(ui, &u, r, radius, tint, (0.5, 0.35)));
-    if !ok {
+    if !draw::cover(ui, covers, r, radius, white(alpha), (0.5, 0.35)) {
         let cr = CornerRadius::same(radius as u8);
         p.rect_filled(r, cr, draw::name_color(&g.name).gamma_multiply(alpha));
         p.text(r.center(), Align2::CENTER_CENTER, draw::initials(&g.name), bold(r.height() * 0.32), white(0.9 * alpha));
@@ -424,11 +694,35 @@ fn paint_tile(ui: &egui::Ui, g: &Game, r: Rect, radius: f32, alpha: f32, focused
     }
 }
 
-fn format_playtime(minutes: f64) -> String {
-    let m = minutes.round() as i64;
+fn format_playtime(secs: f64) -> String {
+    let m = (secs / 60.0).floor() as i64;
     if m < 60 {
-        format!("{m} мин")
+        format!("{} мин", m.max(1))
     } else {
         format!("{} ч {} мин", m / 60, m % 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playtime_is_seconds() {
+        assert_eq!(format_playtime(2100.0), "35 мин");
+        assert_eq!(format_playtime(8340.0), "2 ч 19 мин");
+    }
+
+    #[test]
+    fn plurals() {
+        assert_eq!(plural(1, "игра", "игры", "игр"), "игра");
+        assert_eq!(plural(3, "игра", "игры", "игр"), "игры");
+        assert_eq!(plural(11, "игра", "игры", "игр"), "игр");
+        assert_eq!(plural(22, "игра", "игры", "игр"), "игры");
+    }
+
+    #[test]
+    fn names() {
+        assert_eq!(name_from_path(std::path::Path::new("C:\\G\\my_cool-game.exe")), "my cool game");
     }
 }

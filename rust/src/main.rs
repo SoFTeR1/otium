@@ -6,6 +6,8 @@ mod draw;
 mod fonts;
 mod input;
 mod launch;
+mod modal;
+mod steam;
 
 use std::sync::Arc;
 

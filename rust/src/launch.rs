@@ -19,7 +19,7 @@ pub fn launch(game: &Game) -> Result<(), String> {
         return Err(format!("Файл не найден: {target}"));
     }
     let mut cmd = Command::new(path);
-    cmd.args(split_args(&game.args));
+    cmd.args(split_args(game.args.as_deref().unwrap_or("")));
     if let Some(dir) = path.parent() {
         cmd.current_dir(dir);
     }
