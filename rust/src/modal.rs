@@ -10,7 +10,7 @@ use std::collections::HashSet;
 pub enum Modal {
     Add { focus: usize },
     Import { list: Vec<SteamGame>, picked: HashSet<String>, focus: usize, scroll: f32 },
-    Options { focus: usize, game: String, running: bool },
+    Options { focus: usize, game: String, items: Vec<(Opt, String)> },
     /// the Guide-button menu over a running game
     Control { focus: usize, items: Vec<(CtlAction, &'static str)> },
     ConfirmDelete { focus: usize, game: String },
@@ -38,6 +38,7 @@ pub enum SetMenu {
     Friend,
     Call,
     Group,
+    Edit,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -84,6 +85,16 @@ pub enum SetKey {
     GroupInvite,
     GroupRename,
     GroupLeave,
+    EditName,
+    EditPath,
+    EditBrowse,
+    EditArgs,
+    EditCategory,
+    EditCover,
+    EditIcon,
+    EditCoverReset,
+    EditBackground,
+    EditBackgroundReset,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +103,20 @@ pub struct SetItem {
     pub label: String,
     pub value: String,
     pub danger: bool,
+}
+
+/// The game's "…" menu.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Opt {
+    Play,
+    CloseGame,
+    Edit,
+    MakeFirst,
+    Reorder,
+    SetBackground,
+    ResetBackground,
+    ShowInFolder,
+    Delete,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -109,14 +134,11 @@ pub enum CtlAction {
 pub enum Action {
     None,
     Control(CtlAction),
-    CloseGame,
     Close,
     PickFile,
     OpenImport,
     Import(Vec<SteamGame>),
-    Play,
-    MakeFirst,
-    AskDelete,
+    Option(Opt),
     Delete,
     OpenUrl(String),
     Setting(SetMenu, SetKey, usize),
@@ -128,7 +150,6 @@ pub enum Action {
 }
 
 const ADD_ITEMS: [&str; 2] = ["Импорт игр из Steam", "Выбрать exe или ярлык…"];
-const OPTION_ITEMS: [&str; 3] = ["Играть", "Сделать первой в списке", "Удалить из библиотеки"];
 const CONFIRM_ITEMS: [&str; 2] = ["Отмена", "Удалить"];
 const IMPORT_VISIBLE: usize = 7;
 
@@ -141,7 +162,7 @@ impl Modal {
     fn item_count(&self) -> usize {
         match self {
             Modal::Add { .. } => ADD_ITEMS.len(),
-            Modal::Options { .. } => OPTION_ITEMS.len(),
+            Modal::Options { items, .. } => items.len(),
             Modal::Control { items, .. } => items.len(),
             Modal::ConfirmDelete { .. } => CONFIRM_ITEMS.len(),
             Modal::Import { list, .. } => list.len() + 1,
@@ -238,12 +259,7 @@ impl Modal {
                     Action::Close
                 }
             }
-            Modal::Options { focus, running, .. } if nav == Nav::Ok => match focus {
-                0 if *running => Action::CloseGame,
-                0 => Action::Play,
-                1 => Action::MakeFirst,
-                _ => Action::AskDelete,
-            },
+            Modal::Options { focus, items, .. } if nav == Nav::Ok => Action::Option(items[*focus].0),
             Modal::ConfirmDelete { focus, .. } if nav == Nav::Ok => {
                 if *focus == 1 {
                     Action::Delete
@@ -299,13 +315,10 @@ impl Modal {
                 let r = panel(ui, screen, s, 620.0, "Добавить", ADD_ITEMS.len(), appear);
                 rows(ui, r, s, &ADD_ITEMS, *focus, appear);
             }
-            Modal::Options { focus, game, running } => {
-                let mut items = OPTION_ITEMS;
-                if *running {
-                    items[0] = "Закрыть игру";
-                }
-                let r = panel(ui, screen, s, 620.0, game, items.len(), appear);
-                rows(ui, r, s, &items, *focus, appear);
+            Modal::Options { focus, game, items } => {
+                let labels: Vec<&str> = items.iter().map(|(_, l)| l.as_str()).collect();
+                let r = panel(ui, screen, s, 620.0, game, labels.len(), appear);
+                rows(ui, r, s, &labels, *focus, appear);
             }
             Modal::Keyboard(k) => k.paint(ui, screen, s, appear),
             Modal::Pick { title, items, focus, scroll, max, .. } => {

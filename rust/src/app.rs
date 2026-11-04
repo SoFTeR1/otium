@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 mod calls;
+mod edit;
 mod pages;
 mod run;
 pub use calls::PickFor;
@@ -107,6 +108,10 @@ pub struct App {
     discord_soon: bool,
     social: social::Social,
     calls: calls::Calls,
+    /// the game the editor is open for
+    edit_id: Option<String>,
+    /// "Переставить": Left / Right move the selected tile
+    reorder: bool,
 }
 
 impl App {
@@ -185,6 +190,8 @@ impl App {
             discord_soon: false,
             social: social::Social::new(social_bus),
             calls: calls::Calls::new(calls_bus),
+            edit_id: None,
+            reorder: false,
             lib,
         };
         app.social_start();
@@ -301,6 +308,9 @@ impl App {
         if self.pages.page != 0 && !matches!(nav, Nav::Add | Nav::Options) {
             return self.handle_page(nav);
         }
+        if self.reorder {
+            return self.reorder_nav(nav);
+        }
         let n = self.games.len();
         match (self.zone, nav) {
             (Zone::Row, Nav::Left) if self.sel > 0 => self.select(self.sel - 1),
@@ -313,12 +323,7 @@ impl App {
             (Zone::More, Nav::Left) => self.zone = Zone::Play,
             (Zone::Play | Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
             (Zone::Play | Zone::More, Nav::Down) => self.go_page(1),
-            (Zone::More, Nav::Ok) | (_, Nav::Options) => {
-                if let Some(g) = self.games.get(self.sel) {
-                    let (game, running) = (g.name.clone(), self.is_running(g));
-                    self.open(Modal::Options { focus: 0, game, running });
-                }
-            }
+            (Zone::More, Nav::Ok) | (_, Nav::Options) => self.open_options(),
             (_, Nav::Guide) => self.open_control(),
             (_, Nav::Add) => self.open(Modal::Add { focus: 0 }),
             _ => {}
@@ -338,16 +343,7 @@ impl App {
                 self.modal = None;
                 self.import(list);
             }
-            Action::Play => {
-                self.modal = None;
-                self.launch_selected();
-            }
-            Action::CloseGame => {
-                self.modal = None;
-                if let Some(g) = self.games.get(self.sel).cloned() {
-                    self.close_game(Some(g));
-                }
-            }
+            Action::Option(o) => self.option(o),
             Action::OpenUrl(url) => {
                 if std::env::var_os("OTIUM_NO_OPEN").is_some() {
                     eprintln!("open url (suppressed): {url}");
@@ -364,14 +360,6 @@ impl App {
             Action::Control(c) => {
                 self.modal = None;
                 self.control(c);
-            }
-            Action::MakeFirst => {
-                self.modal = None;
-                self.make_first();
-            }
-            Action::AskDelete => {
-                let game = self.games.get(self.sel).map(|g| g.name.clone()).unwrap_or_default();
-                self.open(Modal::ConfirmDelete { focus: 0, game });
             }
             Action::Delete => {
                 self.modal = None;
@@ -431,7 +419,8 @@ impl App {
             return;
         }
         let name = name_from_path(&path);
-        let game = Game::new(&name, &path_str);
+        let mut game = Game::new(&name, &path_str);
+        game.cover = Library::exe_icon(&path_str);
         let id = game.id.clone();
         self.lib.games.push(game);
         self.save();
@@ -736,6 +725,7 @@ impl App {
             (Some(m), _) => m.hints(),
             (None, _) if self.calls.card_open() => vec![],
             (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
+            (None, 0) if self.reorder => vec![(0, "Готово")],
             (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
             (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
@@ -784,6 +774,19 @@ impl App {
 
         let g = &self.games[self.sel];
         let art = self.art(g);
+        if in_row && self.reorder {
+            // arrows on both sides of the tile being moved
+            let x = left + (self.sel as f32 - self.scroll) * (tile + gap);
+            let cy = row_y + big / 2.0;
+            let p = ui.painter();
+            // centred in the gaps next to the tile
+            if self.sel > 0 {
+                p.text(pos2(x - gap / 2.0, cy), Align2::CENTER_CENTER, "◀", bold(16.0 * s), white(appear));
+            }
+            if self.sel + 1 < self.games.len() {
+                p.text(pos2(x + big + gap / 2.0, cy), Align2::CENTER_CENTER, "▶", bold(16.0 * s), white(appear));
+            }
+        }
         if in_row {
             ui.painter().text(
                 pos2(left + big + gap + 4.0 * s, row_y + big + 6.0 * s),
@@ -809,7 +812,7 @@ impl App {
             draw::glow(p, btn, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
         }
         p.rect_filled(btn, CornerRadius::same((34.0 * s) as u8), if play_focus { Color32::WHITE } else { white(0.88) });
-        p.text(btn.center(), Align2::CENTER_CENTER, "Играть", semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
+        p.text(btn.center(), Align2::CENTER_CENTER, if g.is_app() { "Открыть" } else { "Играть" }, semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
 
         let more = Rect::from_center_size(pos2(btn.right() + 24.0 * s + 34.0 * s, btn.center().y), vec2(68.0 * s, 68.0 * s));
         let more_focus = self.zone == Zone::More && no_modal;

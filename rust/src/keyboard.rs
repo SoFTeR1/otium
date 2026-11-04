@@ -18,6 +18,9 @@ pub enum Target {
     Rename,
     GroupName,
     GroupRename,
+    GameName,
+    GamePath,
+    GameArgs,
 }
 
 impl Target {
@@ -85,7 +88,7 @@ impl Keyboard {
     pub fn new(title: &str, text: &str, target: Target, max: usize, secret: bool) -> Self {
         // codes and keys are typed in latin letters; names usually in Russian
         let layout = match target {
-            Target::ApiKey | Target::SteamId | Target::LoginKey => Layout::En,
+            Target::ApiKey | Target::SteamId | Target::LoginKey | Target::GamePath | Target::GameArgs => Layout::En,
             _ => Layout::Ru,
         };
         Self { title: title.into(), text: text.into(), target, max, secret, layout, shift: false, row: 1, col: 0 }

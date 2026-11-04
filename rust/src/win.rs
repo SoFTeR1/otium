@@ -323,3 +323,107 @@ fn covers_monitor(h: isize) -> bool {
         r.left <= mr.left && r.top <= mr.top && r.right >= mr.right && r.bottom >= mr.bottom
     }
 }
+
+/// The exe's own icon at 256×256 (Windows scales smaller ones up), saved as PNG.
+pub fn exe_icon_png(exe: &Path, out: &Path) -> bool {
+    use windows::Win32::Graphics::Gdi::{
+        DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, PrivateExtractIconsW, HICON, ICONINFO};
+    const SIZE: i32 = 256;
+    let mut name = [0u16; 260];
+    let wide: Vec<u16> = exe.as_os_str().encode_wide_vec();
+    if wide.len() >= name.len() {
+        return false;
+    }
+    name[..wide.len()].copy_from_slice(&wide);
+    unsafe {
+        let mut icons = [HICON::default()];
+        let n = PrivateExtractIconsW(&name, 0, SIZE, SIZE, Some(&mut icons), None, 0);
+        if n == 0 || n == u32::MAX || icons[0].is_invalid() {
+            return false;
+        }
+        let icon = icons[0];
+        let mut info = ICONINFO::default();
+        let ok = GetIconInfo(icon, &mut info).is_ok();
+        let mut px = vec![0u8; (SIZE * SIZE * 4) as usize];
+        let mut got = false;
+        if ok && !info.hbmColor.is_invalid() {
+            let dc = GetDC(None);
+            let mut bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: SIZE,
+                    biHeight: -SIZE, // top-down rows
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            got = GetDIBits(dc, info.hbmColor, 0, SIZE as u32, Some(px.as_mut_ptr().cast()), &mut bmi, DIB_RGB_COLORS) == SIZE;
+            ReleaseDC(None, dc);
+        }
+        if !info.hbmColor.is_invalid() {
+            let _ = DeleteObject(info.hbmColor);
+        }
+        if !info.hbmMask.is_invalid() {
+            let _ = DeleteObject(info.hbmMask);
+        }
+        let _ = DestroyIcon(icon);
+        if !got {
+            return false;
+        }
+        // BGRA -> RGBA; very old icons carry no alpha at all: treat them as opaque
+        let no_alpha = px.chunks(4).all(|p| p[3] == 0);
+        for p in px.chunks_mut(4) {
+            p.swap(0, 2);
+            if no_alpha {
+                p[3] = 255;
+            }
+        }
+        let Some(img) = image::RgbaImage::from_raw(SIZE as u32, SIZE as u32, px) else { return false };
+        if let Some(dir) = out.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        img.save_with_format(out, image::ImageFormat::Png).is_ok()
+    }
+}
+
+trait WideVec {
+    fn encode_wide_vec(&self) -> Vec<u16>;
+}
+impl WideVec for std::ffi::OsStr {
+    fn encode_wide_vec(&self) -> Vec<u16> {
+        use std::os::windows::ffi::OsStrExt;
+        self.encode_wide().collect()
+    }
+}
+
+/// Opens Explorer with the file selected.
+pub fn show_in_folder(path: &Path) {
+    use std::os::windows::process::CommandExt;
+    if std::env::var_os("OTIUM_NO_OPEN").is_some() {
+        eprintln!("show in folder (suppressed): {}", path.display());
+        return;
+    }
+    let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
+}
+
+/// A window handle for dialogs that need a parent (rfd) when only the HWND is at hand.
+pub struct Owner(pub isize);
+
+impl raw_window_handle::HasWindowHandle for Owner {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        let h = std::num::NonZeroIsize::new(self.0).ok_or(raw_window_handle::HandleError::Unavailable)?;
+        let raw = raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(h));
+        Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) })
+    }
+}
+
+impl raw_window_handle::HasDisplayHandle for Owner {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::DisplayHandle::windows())
+    }
+}

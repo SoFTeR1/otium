@@ -65,6 +65,15 @@ impl Game {
     pub fn category(&self) -> &str {
         self.extra.get("category").and_then(Value::as_str).unwrap_or("game")
     }
+
+    pub fn is_app(&self) -> bool {
+        self.category() == "app"
+    }
+
+    /// A real file on disk (not a steam:// or https:// link).
+    pub fn is_file(&self) -> bool {
+        !self.path.contains("://") && std::path::Path::new(&self.path).is_absolute()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -88,6 +97,36 @@ impl Library {
 
     pub fn file() -> PathBuf {
         Self::data_dir().join("library.json")
+    }
+
+    /// Covers and backgrounds the user picked live here, like in the Electron build.
+    pub fn media_dir() -> PathBuf {
+        Self::data_dir().join("media")
+    }
+
+    /// A fresh file name in the media folder: `<ms>_<random>.<ext>`.
+    pub fn media_file(prefix: &str, ext: &str) -> PathBuf {
+        let rand: String = uuid::Uuid::new_v4().simple().to_string().chars().take(6).collect();
+        Self::media_dir().join(format!("{prefix}{}_{rand}.{ext}", now_ms() as u64))
+    }
+
+    /// Copies a picked file into the media folder and returns its `file:///` URL.
+    pub fn import_media(src: &std::path::Path) -> std::io::Result<String> {
+        std::fs::create_dir_all(Self::media_dir())?;
+        let ext = src.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| "jpg".into());
+        let dest = Self::media_file("", &ext);
+        std::fs::copy(src, &dest)?;
+        Ok(file_url(&dest.to_string_lossy()))
+    }
+
+    /// The exe's icon as a cover image (`file:///` URL), or None when it has none.
+    pub fn exe_icon(exe: &str) -> Option<String> {
+        let p = std::path::Path::new(exe);
+        if !exe.to_lowercase().ends_with(".exe") || !p.is_file() {
+            return None;
+        }
+        let dest = Self::media_file("icon_", "png");
+        crate::win::exe_icon_png(p, &dest).then(|| file_url(&dest.to_string_lossy()))
     }
 
     pub fn load() -> Self {
@@ -228,6 +267,10 @@ impl Game {
     pub fn custom_background(&self) -> Option<&str> {
         self.extra.get("background").and_then(Value::as_str).filter(|s| !s.is_empty())
     }
+
+    pub fn set_background(&mut self, url: &str) {
+        self.extra.insert("background".into(), Value::from(url));
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +292,21 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+    /// The exe-icon cover: notepad's icon comes out as a 256×256 PNG with something drawn in it.
+    #[test]
+    #[ignore]
+    fn exe_icon() {
+        let out = std::env::temp_dir().join("otium_icon_test.png");
+        let exe = std::path::Path::new(r"C:\Windows\System32\notepad.exe");
+        assert!(crate::win::exe_icon_png(exe, &out), "no icon");
+        let img = image::open(&out).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (256, 256));
+        let opaque = img.pixels().filter(|p| p[3] > 0).count();
+        println!("icon: {opaque} visible pixels");
+        assert!(opaque > 1000);
+        let _ = std::fs::remove_file(out);
+    }
+
     /// Load + serialize the real library in memory and check nothing is lost (nothing is written).
     #[test]
     #[ignore]

@@ -121,6 +121,7 @@ impl App {
             }
             // the friends panel builds these itself
             SetMenu::Profile | SetMenu::Friend | SetMenu::Call | SetMenu::Group => return,
+            SetMenu::Edit => return self.open_editor(focus),
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -143,7 +144,7 @@ impl App {
         }
     }
 
-    fn keyboard(&mut self, title: &str, text: &str, target: Target, max: usize, secret: bool) {
+    pub(super) fn keyboard(&mut self, title: &str, text: &str, target: Target, max: usize, secret: bool) {
         self.open(Modal::Keyboard(Box::new(Keyboard::new(title, text, target, max, secret))));
     }
 
@@ -156,6 +157,9 @@ impl App {
         }
         if menu == SetMenu::Group {
             return self.group_setting(key);
+        }
+        if menu == SetMenu::Edit {
+            return self.edit_setting(key, focus);
         }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
@@ -234,7 +238,17 @@ impl App {
             | SetKey::GroupVoice
             | SetKey::GroupInvite
             | SetKey::GroupRename
-            | SetKey::GroupLeave => {}
+            | SetKey::GroupLeave
+            | SetKey::EditName
+            | SetKey::EditPath
+            | SetKey::EditBrowse
+            | SetKey::EditArgs
+            | SetKey::EditCategory
+            | SetKey::EditCover
+            | SetKey::EditIcon
+            | SetKey::EditCoverReset
+            | SetKey::EditBackground
+            | SetKey::EditBackgroundReset => {}
             SetKey::ApiKey => {
                 let k = self.lib.setting_str("steamApiKey").to_string();
                 self.keyboard("Steam Web API-ключ", &k, Target::ApiKey, 64, true);
@@ -328,6 +342,9 @@ impl App {
                 self.modal = None;
                 return;
             }
+            if let Some(t @ (Target::GameName | Target::GamePath | Target::GameArgs)) = self.last_text_target {
+                return self.edit_text_cancelled(t);
+            }
             return self.reopen_after_text(None);
         };
         if matches!(target, Target::GroupName | Target::GroupRename) {
@@ -336,6 +353,9 @@ impl App {
         }
         if target.is_social() {
             return self.social_text(target, text);
+        }
+        if matches!(target, Target::GameName | Target::GamePath | Target::GameArgs) {
+            return self.edit_text(target, text);
         }
         match target {
             Target::User => {
