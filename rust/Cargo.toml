@@ -1,0 +1,29 @@
+[package]
+name = "otium"
+version = "3.0.0-alpha.1"
+edition = "2021"
+description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
+authors = ["SoFTeR1"]
+publish = false
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts", "persistence"] }
+egui = "0.31"
+egui_extras ={ version = "0.31", features = ["all_loaders"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+gilrs = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = "0.4"
+open = "5"
+dirs = "5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 2
