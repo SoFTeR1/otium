@@ -303,3 +303,105 @@ mod live_trophies {
         }
     }
 }
+
+// ---------- public art for Discord ----------
+
+/// The digits in a name, in order: "UFC 6" never borrows "UFC 5"'s cover.
+fn nums(s: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            cur.push(c);
+        } else if !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out.join(" ")
+}
+
+/// Lowercase letters and digits only, words joined: "Drive Club™" → "driveclub".
+fn squashed(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Whether a store or Wikipedia title is this game: the same numbers (a year or "(video game)" in
+/// the title don't count) and the whole name in order, spaces ignored.
+pub fn same_game(name: &str, title: &str) -> bool {
+    let t = title.replace("(video game)", "").replace(" video game)", ")");
+    let want = nums(name);
+    let year = |n: &str| n.len() == 4 && (n.starts_with("19") || n.starts_with("20"));
+    let tn = nums(&t);
+    let have: Vec<&str> = tn.split(' ').filter(|n| !n.is_empty() && !(year(n) && !want.split(' ').any(|w| w == *n))).collect();
+    want == have.join(" ") && !squashed(name).is_empty() && squashed(&t).contains(&squashed(name))
+}
+
+/// A public picture of a game that isn't on Steam in the library, for the Discord status (Discord
+/// only shows images by URL): the Steam store's header if the game is sold there, else the
+/// Wikipedia article's image (usually the box art). Empty when nothing fits.
+pub fn find_public_art(name: &str) -> String {
+    let a = agent();
+    if let Ok(r) = a.get("https://store.steampowered.com/api/storesearch/").query("term", name).query("cc", "US").query("l", "english").call() {
+        if let Ok(v) = r.into_json::<Value>() {
+            if let Some(hit) = v["items"].as_array().into_iter().flatten().find(|it| same_game(name, it["name"].as_str().unwrap_or(""))) {
+                if let Some(id) = hit["id"].as_u64() {
+                    return format!("{}/{id}/header.jpg", crate::steam::CDN);
+                }
+            }
+        }
+    }
+    // as typed, then written together ("Drive Club" → "Driveclub")
+    let together: String = name.split_whitespace().collect();
+    let mut terms = vec![name.to_string()];
+    if together != name {
+        terms.push(together);
+    }
+    for term in terms {
+        let req = a
+            .get("https://en.wikipedia.org/w/api.php")
+            .query("action", "query")
+            .query("format", "json")
+            .query("generator", "search")
+            .query("gsrlimit", "5")
+            .query("prop", "pageimages")
+            .query("piprop", "original")
+            .query("pilicense", "any")
+            .query("gsrsearch", &format!("{term} video game"));
+        let Ok(r) = req.call() else { continue };
+        let Ok(v) = r.into_json::<Value>() else { continue };
+        let mut pages: Vec<&Value> = v["query"]["pages"].as_object().map(|m| m.values().collect()).unwrap_or_default();
+        pages.sort_by_key(|p| p["index"].as_i64().unwrap_or(99));
+        if let Some(src) = pages.iter().find(|p| p["original"]["source"].is_string() && same_game(name, p["title"].as_str().unwrap_or(""))).and_then(|p| p["original"]["source"].as_str()) {
+            return src.split('?').next().unwrap_or(src).to_string();
+        }
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod art_tests {
+    use super::*;
+
+    #[test]
+    fn matching_titles() {
+        assert!(same_game("UFC 4", "EA Sports UFC 4"));
+        assert!(!same_game("UFC 6", "EA Sports UFC 5"));
+        assert!(same_game("Drive Club", "Driveclub"));
+        assert!(!same_game("Drive Club", "Club Drive"));
+        assert!(same_game("Shadow of the Colossus", "Shadow of the Colossus (2018 video game)"));
+        assert!(same_game("Shadow of the Colossus", "Shadow of the Colossus (video game)"));
+        assert!(same_game("Doom", "Doom (2016)"));
+    }
+
+    /// `cargo test -- --ignored public_art --nocapture`
+    #[test]
+    #[ignore]
+    fn public_art() {
+        for name in ["UFC 3", "Drive Club", "Shadow of the Colossus", "Hades"] {
+            println!("{name}: {}", find_public_art(name));
+        }
+    }
+}

@@ -51,11 +51,11 @@ fn row_key(r: Row) -> u8 {
 }
 
 impl App {
-    fn steam_key(&self) -> String {
+    pub(super) fn steam_key(&self) -> String {
         self.lib.setting_str("steamApiKey").trim().to_string()
     }
 
-    fn steam_user(&self) -> String {
+    pub(super) fn steam_user(&self) -> String {
         let s = self.lib.setting_str("steamId").trim().to_string();
         if s.is_empty() {
             self.steam_user_local.clone().unwrap_or_default()
@@ -236,6 +236,12 @@ impl App {
                 self.pages.news.insert(appid, items);
             }
             Event::Trophies { appid, res } => {
+                // the trophies page also keeps "last trophy" up to date, quietly
+                if let Ok(t) = &res {
+                    let game = self.lib.games.iter().find(|g| g.steam_app_id().as_deref() == Some(appid.as_str())).map(|g| g.name.clone()).unwrap_or_default();
+                    let items = t.items.clone();
+                    self.note_trophy(&game, &appid, &items, false);
+                }
                 self.pages.trophies.insert(appid, res);
             }
             Event::FeedDone { appid } => {

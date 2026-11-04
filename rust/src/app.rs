@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 mod calls;
 mod control;
+mod profile;
 pub use control::MixerPanel;
 mod edit;
 mod pages;
@@ -67,6 +68,8 @@ pub struct App {
     overlay: crate::overlay::Overlay,
     overlay_demo_toasts: u32,
     timer: control::SleepTimer,
+    /// game names looked up for Discord art this session
+    art_searched: HashSet<String>,
     fullscreen: bool,
     fs_tries: u32,
     started: Instant,
@@ -168,6 +171,7 @@ impl App {
             overlay: Default::default(),
             overlay_demo_toasts: 0,
             timer: Default::default(),
+            art_searched: HashSet::new(),
             fullscreen,
             fs_tries: 0,
             started: Instant::now(),
@@ -304,6 +308,9 @@ impl App {
         }
         if matches!(self.modal, Some(Modal::Control { .. })) {
             return self.control_nav(nav);
+        }
+        if matches!(self.modal, Some(Modal::Friend { .. })) {
+            return self.friend_profile_nav(nav);
         }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
@@ -607,6 +614,7 @@ impl eframe::App for App {
         }
         self.tick(ctx);
         self.tick_timer();
+        self.debug_open_profile();
         self.tick_pages();
         self.social_tick();
         self.calls_tick();
@@ -781,6 +789,8 @@ impl App {
             m.paint(ui, rect, s, dt, a);
             if matches!(m, Modal::Control { .. }) {
                 self.paint_control(ui, rect, s, dt, a);
+            } else if matches!(m, Modal::Friend { .. }) {
+                self.paint_friend_profile(ui, rect, s, a);
             }
         }
         self.paint_toast(ui, rect, s);

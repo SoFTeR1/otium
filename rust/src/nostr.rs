@@ -24,6 +24,8 @@ pub enum Cmd {
     Search,
     /// the profile name and contact list of an account, for signing in with a key
     FetchAccount(String),
+    /// a friend's published library (kind 30078, d = "ps5l-library")
+    FetchLibrary(String),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +36,8 @@ pub enum Msg {
     Players(Vec<(String, String)>),
     Account { name: Option<String>, friends: Vec<(String, String)> },
     SendFailed,
+    /// the library a player published (None = none found)
+    Library { pk: String, content: Option<String> },
 }
 
 pub struct Nostr {
@@ -175,6 +179,16 @@ async fn run(mut rx: UnboundedReceiver<Cmd>, send: impl Fn(Msg) + Send + 'static
                             }
                         }
                         send(Msg::Players(latest.into_iter().map(|(pk, (_, n))| (pk, n)).collect()));
+                    }
+                    Cmd::FetchLibrary(pk) => {
+                        let (Ok(author), Some(s)) = (PublicKey::from_hex(&pk), &session) else {
+                            send(Msg::Library { pk, content: None });
+                            continue;
+                        };
+                        let f = Filter::new().kind(Kind::from(30078u16)).author(author).identifier("ps5l-library").limit(3);
+                        let evs = s.client.fetch_events(f).timeout(Duration::from_secs(8)).await.unwrap_or_default();
+                        let content = evs.iter().max_by_key(|e| e.created_at).map(|e| e.content.clone());
+                        send(Msg::Library { pk, content });
                     }
                     Cmd::FetchAccount(pk) => {
                         let Ok(pk) = PublicKey::from_hex(&pk) else { continue };

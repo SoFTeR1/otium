@@ -44,8 +44,8 @@ pub struct Social {
     presence: HashMap<String, (String, f64)>,
     profiles: HashMap<String, (String, u64)>,
     seen: HashSet<String>,
-    me: Option<String>,
-    net: nostr::Nostr,
+    pub(super) me: Option<String>,
+    pub(super) net: nostr::Nostr,
     presence_at: Option<Instant>,
     save_at: Option<Instant>,
     /// what "find friends" is looking for, while the search runs
@@ -299,6 +299,7 @@ impl App {
                 self.toast(&hello, false);
             }
             Msg::SendFailed => self.toast("Сообщение не отправлено — нет связи", true),
+            Msg::Library { pk, content } => self.on_library(&pk, content),
         }
     }
 
@@ -515,6 +516,13 @@ impl App {
         }
     }
 
+    /// Opens the chat with a friend in the friends panel.
+    pub(super) fn open_friend_chat(&mut self, pk: &str) {
+        let Some(a) = self.account() else { return };
+        self.social.open = true;
+        self.activate(&a, Item::Friend(pk.to_string()));
+    }
+
     fn activate(&mut self, a: &Account, it: Item) {
         match it {
             Item::Me => self.open_profile(a),
@@ -552,6 +560,7 @@ impl App {
     fn open_friend_menu(&mut self, a: &Account, pk: &str) {
         self.social.menu_pk = Some(pk.to_string());
         let items = vec![
+            SetItem { key: SetKey::FriendProfile, label: "Профиль".into(), value: "игры и трофеи".into(), danger: false },
             SetItem { key: SetKey::FriendChat, label: "Написать".into(), value: String::new(), danger: false },
             SetItem { key: SetKey::FriendCall, label: "Позвонить".into(), value: "голосовой звонок".into(), danger: false },
             SetItem { key: SetKey::FriendRemove, label: "Удалить из друзей".into(), value: String::new(), danger: true },
@@ -588,6 +597,11 @@ impl App {
                 self.modal = None;
                 if let Some(pk) = self.social.menu_pk.take() {
                     self.activate(&a, Item::Friend(pk));
+                }
+            }
+            SetKey::FriendProfile => {
+                if let Some(pk) = self.social.menu_pk.take() {
+                    self.open_friend_profile(&pk);
                 }
             }
             SetKey::FriendCall => {

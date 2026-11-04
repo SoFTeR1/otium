@@ -25,6 +25,10 @@ pub enum Event {
     News { appid: String, items: Vec<crate::steam_api::News> },
     Trophies { appid: String, res: Result<crate::steam_api::Trophies, crate::steam_api::ApiError> },
     FeedDone { appid: String },
+    /// achievements of a Steam game that just closed, to announce new trophies (`since` = unix ms)
+    TrophyCheck { appid: String, since: f64, res: Result<crate::steam_api::Trophies, crate::steam_api::ApiError> },
+    /// public art found for a game, for the Discord status ("" = nothing fits)
+    PublicArt { id: String, name: String, url: String },
     /// show the window (tray click); egui has to be told, or it keeps it hidden
     Show,
     Nostr(crate::nostr::Msg),

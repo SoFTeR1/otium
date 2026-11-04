@@ -21,6 +21,8 @@ pub struct Toast {
     pub text: String,
     /// (key for the colour, name for the letter) — a friend or a group
     pub avatar: Option<(String, String)>,
+    /// a picture instead (a trophy's icon)
+    pub img: Option<String>,
     pub error: bool,
     at: Instant,
 }
@@ -61,9 +63,16 @@ pub struct Overlay {
 
 impl Overlay {
     pub fn toast(&mut self, title: &str, text: &str, avatar: Option<(String, String)>, error: bool) {
-        self.toasts.push(Toast { title: title.into(), text: text.into(), avatar, error, at: Instant::now() });
+        self.toasts.push(Toast { title: title.into(), text: text.into(), avatar, img: None, error, at: Instant::now() });
         let extra = self.toasts.len().saturating_sub(MAX_TOASTS);
         self.toasts.drain(..extra);
+    }
+
+    pub fn toast_img(&mut self, title: &str, text: &str, img: Option<String>) {
+        self.toast(title, text, None, false);
+        if let Some(t) = self.toasts.last_mut() {
+            t.img = img;
+        }
     }
 
     /// Draws the overlay window for this frame, or closes it when there is nothing to show.
@@ -327,7 +336,9 @@ fn paint_toasts(ui: &egui::Ui, rect: Rect, s: f32, toasts: &[Toast]) {
         p.text(pos2(badge.right() + 8.0 * s, badge.center().y), Align2::LEFT_CENTER, "OTIUM", font(13.0 * s), Color32::from_rgb(185, 192, 208).gamma_multiply(k));
         // picture: friend's letter or a gamepad
         let pic = Rect::from_min_size(pos2(card.left() + 14.0 * s, card.top() + 44.0 * s), vec2(50.0 * s, 50.0 * s));
+        let pictured = t.img.as_ref().is_some_and(|u| draw::cover(ui, &[u.clone()], pic, 10.0 * s, white(k), (0.5, 0.5)));
         match &t.avatar {
+            _ if pictured => {}
             Some((key, name)) => {
                 p.circle_filled(pic.center(), 25.0 * s, draw::name_color(key).gamma_multiply(k));
                 p.text(pic.center(), Align2::CENTER_CENTER, letter(name), bold(21.0 * s), white(k));

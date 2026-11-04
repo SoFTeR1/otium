@@ -260,6 +260,9 @@ impl App {
                     // Steam writes its own playtime a moment after the game closes
                     self.reload_steam_at = Some(Instant::now() + Duration::from_secs(6));
                     self.trophies_changed(prev);
+                    if let Some(start) = since {
+                        self.check_trophies_later(prev, start);
+                    }
                 }
                 self.discord_soon = true;
                 if id != 0 {
@@ -300,6 +303,8 @@ impl App {
             Event::Toast { text, error } => self.toast(&text, error),
             Event::Nostr(m) => self.on_nostr(m),
             Event::Voice(v) => self.on_voice(v),
+            Event::TrophyCheck { appid, since, res } => self.on_trophy_check(&appid, since, res),
+            Event::PublicArt { id, name, url } => self.on_public_art(&id, &name, url),
             e @ (Event::News { .. } | Event::Trophies { .. } | Event::FeedDone { .. } | Event::Music(_)) => self.on_feed_event(e),
         }
     }

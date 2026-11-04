@@ -243,6 +243,7 @@ impl App {
             | SetKey::FriendChat
             | SetKey::FriendRemove
             | SetKey::FriendCall
+            | SetKey::FriendProfile
             | SetKey::CallMute
             | SetKey::CallDeafen
             | SetKey::CallVolume
@@ -477,6 +478,7 @@ impl App {
         if self.lib.setting_str("discordId").is_empty() {
             return;
         }
+        self.ensure_public_art();
         let s = &self.lib;
         let icon = crate::discord::APP_ICON;
         let running = self.games.iter().find(|g| self.running.contains(&g.id));

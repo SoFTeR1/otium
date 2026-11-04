@@ -69,7 +69,7 @@ impl ImageLoader for Thumbs {
         self.cache.lock().unwrap().insert(key.clone(), Entry::Pending);
         let (cache, ctx) = (self.cache.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let entry = match decode(&bytes, max) {
+            let entry = match decode(&bytes, max).and_then(|img| if is_steam_placeholder(&key.0, &bytes) { Err("Steam placeholder".into()) } else { Ok(img) }) {
                 Ok(img) => Entry::Ready(Arc::new(img)),
                 Err(e) => Entry::Failed(e),
             };
@@ -102,6 +102,15 @@ impl ImageLoader for Thumbs {
             })
             .sum()
     }
+}
+
+/// The Steam CDN answers for a game without portrait art with a plain grey 300×450 picture, not
+/// a 404: treat it as missing so the next candidate (the wide header) is used.
+fn is_steam_placeholder(uri: &str, bytes: &[u8]) -> bool {
+    if !uri.contains("steamstatic.com") || !uri.contains("library_600x900") || bytes.len() > 8 * 1024 {
+        return false;
+    }
+    image::load_from_memory(bytes).is_ok_and(|img| img.color() == image::ColorType::L8 && img.width() == 300 && img.height() == 450)
 }
 
 fn decode(bytes: &[u8], max: u32) -> Result<ColorImage, String> {

@@ -25,6 +25,8 @@ pub enum Modal {
     /// "find friends" results: (public key, name, state)
     Players { items: Vec<(String, String, String)>, focus: usize, scroll: f32 },
     FriendRequest { pk: String, name: String, focus: usize },
+    /// a friend's profile: their library once it arrives (Some(None) = they have none published)
+    Friend { pk: String, lib: Option<Option<serde_json::Value>>, scroll: f32 },
     /// pick friends (for a group or a call): (public key, name, picked); the last row is "Готово"
     Pick { title: String, items: Vec<(String, String, bool)>, focus: usize, scroll: f32, max: usize, purpose: crate::app::PickFor },
 }
@@ -84,6 +86,7 @@ pub enum SetKey {
     FriendChat,
     FriendRemove,
     FriendCall,
+    FriendProfile,
     CallMute,
     CallDeafen,
     CallVolume,
@@ -163,7 +166,7 @@ impl Modal {
         match self {
             Modal::Add { .. } => ADD_ITEMS.len(),
             Modal::Options { items, .. } => items.len(),
-            Modal::Control { .. } => 0,
+            Modal::Control { .. } | Modal::Friend { .. } => 0,
             Modal::ConfirmDelete { .. } => CONFIRM_ITEMS.len(),
             Modal::Import { list, .. } => list.len() + 1,
             Modal::Message { .. } | Modal::News { .. } => 1,
@@ -188,7 +191,7 @@ impl Modal {
             | Modal::Players { focus, .. }
             | Modal::Pick { focus, .. }
             | Modal::FriendRequest { focus, .. } => Some(focus),
-            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) | Modal::PadTest(_) | Modal::Control { .. } => None,
+            Modal::Message { .. } | Modal::News { .. } | Modal::Keyboard(_) | Modal::PadTest(_) | Modal::Control { .. } | Modal::Friend { .. } => None,
         }
     }
 
@@ -313,6 +316,7 @@ impl Modal {
             Modal::PadTest(_) => vec![],
             Modal::Control { mixer: Some(_), .. } => vec![(0, "Выкл. звук"), (1, "Назад")],
             Modal::Control { .. } => vec![(0, "Выбрать"), (1, "Закрыть")],
+            Modal::Friend { .. } => vec![(0, "Написать"), (2, "Позвонить"), (1, "Назад")],
             _ => vec![(0, "Выбрать"), (1, "Назад")],
         }
     }
@@ -436,7 +440,7 @@ impl Modal {
                     clip.text(pos2(row.right() - 20.0 * s, row.center().y), Align2::RIGHT_CENTER, &it.value, font(19.0 * s), fg.gamma_multiply(0.65));
                 }
             }
-            Modal::Control { .. } => {}
+            Modal::Control { .. } | Modal::Friend { .. } => {}
             Modal::ConfirmDelete { focus, game } => {
                 let r = panel(ui, screen, s, 620.0, &format!("Удалить «{game}»?"), CONFIRM_ITEMS.len() + 1, appear);
                 let p = ui.painter();
