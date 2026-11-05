@@ -24,11 +24,20 @@ pub struct Item {
     #[serde(default)]
     pub needs: Option<String>,
     /// owner/name on GitHub
+    #[serde(default)]
     pub repo: String,
     /// how the name of the Windows archive in a release ends
+    #[serde(default)]
     pub asset: String,
     /// the program, relative to the unpacked folder
+    #[serde(default)]
     pub exe: String,
+    /// a game that runs through a launcher: that launcher's id (installing means installing it)
+    #[serde(default)]
+    pub via: Option<String>,
+    /// a launcher, not shown as a tile of its own
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(default)]
     pub args: String,
     /// it updates itself (OTIUM leaves that to it)
@@ -42,6 +51,9 @@ impl Item {
     fn is_safe(&self) -> bool {
         let id_ok = !self.id.is_empty() && self.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
         let word = |s: &str| !s.is_empty() && s != "." && s != ".." && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+        if let Some(v) = &self.via {
+            return id_ok && word(v);
+        }
         let repo_ok = self.repo.split_once('/').is_some_and(|(a, b)| word(a) && word(b));
         let exe = Path::new(&self.exe);
         let exe_ok = self.exe.to_ascii_lowercase().ends_with(".exe") && exe.components().all(|c| matches!(c, Component::Normal(_)));
@@ -373,9 +385,15 @@ mod tests {
     #[test]
     fn built_in_catalog_is_whole() {
         let c = parse(BUILT_IN);
-        assert_eq!(c.len(), 8, "a record failed the checks");
-        assert!(c.iter().any(|i| i.id == "portheon" && i.self_updates && i.needs.is_some()));
+        assert_eq!(c.len(), 15, "a record failed the checks");
+        assert!(c.iter().any(|i| i.id == "portheon" && i.self_updates && i.hidden));
         assert!(c.iter().any(|i| i.id == "supertuxkart" && i.needs.is_none()));
+        // UFC 1-6 and Undisputed 3 all lead to a launcher that is in the catalog
+        let via: Vec<_> = c.iter().filter(|i| i.via.is_some()).collect();
+        assert_eq!(via.len(), 7);
+        for i in via {
+            assert!(!i.hidden && c.iter().any(|l| Some(&l.id) == i.via.as_ref() && l.hidden && !l.repo.is_empty()));
+        }
     }
 
     #[test]
@@ -392,6 +410,7 @@ mod tests {
         assert!(bad(&|i| i.exe = "readme.txt".into()));
         assert!(bad(&|i| i.repo = "a/../../b".into()));
         assert!(bad(&|i| i.asset = "installer.exe".into()));
+        assert!(bad(&|i| i.via = Some("../x".into())));
     }
 
     #[test]
@@ -554,7 +573,7 @@ mod live {
     #[test]
     #[ignore]
     fn store_releases() {
-        for i in parse(BUILT_IN) {
+        for i in parse(BUILT_IN).into_iter().filter(|i| i.via.is_none()) {
             let r = latest(&i).unwrap_or_else(|e| panic!("{}: {e}", i.id));
             println!("{}: {} {} ({} MB), checksums: {}", i.id, r.version, r.name, r.size / 1_048_576, r.sums_url.is_some());
         }

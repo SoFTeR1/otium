@@ -12,7 +12,12 @@ use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct Shop {
+    /// the tiles
     pub items: Vec<Item>,
+    /// the whole catalog: the tiles and the launchers behind them
+    all: Vec<Item>,
+    /// the launcher is being installed for a game: its question was already asked
+    via: bool,
     /// the one install running now, and how far it got
     pub busy: Option<(String, Stage, u8)>,
     /// id -> the version in the latest release, for installed games that OTIUM updates
@@ -60,9 +65,19 @@ fn gigabytes(bytes: u64) -> String {
 impl App {
     pub(super) fn shop_items(&mut self) -> &[Item] {
         if self.shop.items.is_empty() {
-            self.shop.items = store::catalog();
+            self.set_catalog(store::catalog());
         }
         &self.shop.items
+    }
+
+    fn set_catalog(&mut self, all: Vec<Item>) {
+        self.shop.items = all.iter().filter(|i| !i.hidden).cloned().collect();
+        self.shop.all = all;
+    }
+
+    /// What really gets installed and started for a tile: its launcher, or the game itself.
+    pub(super) fn store_target(&self, item: &Item) -> Item {
+        item.via.as_ref().and_then(|v| self.shop.all.iter().find(|l| l.id == *v)).unwrap_or(item).clone()
     }
 
     fn store_record(&self, id: &str) -> Option<&Value> {
@@ -94,7 +109,7 @@ impl App {
         }
         let bus = self.bus.clone();
         let installed: Vec<String> = self.lib.settings.get("store").and_then(Value::as_object).map(|m| m.keys().cloned().collect()).unwrap_or_default();
-        let have = self.shop.items.clone();
+        let have = self.shop.all.clone();
         std::thread::spawn(move || {
             let items = store::fetch_catalog().unwrap_or(have);
             for i in items.iter().filter(|i| !i.self_updates && installed.contains(&i.id)) {
@@ -108,7 +123,8 @@ impl App {
 
     /// A on a Store tile.
     pub(super) fn shop_activate(&mut self, i: usize) {
-        let Some(item) = self.shop_items().get(i).cloned() else { return };
+        let Some(tile) = self.shop_items().get(i).cloned() else { return };
+        let item = self.store_target(&tile);
         if self.shop.busy.as_ref().is_some_and(|b| b.0 == item.id) {
             return;
         }
@@ -119,6 +135,19 @@ impl App {
             return self.toast("Сначала дождитесь конца текущей установки", false);
         }
         self.shop.current = Some(item.id.clone());
+        self.shop.via = tile.via.is_some();
+        if self.shop.via {
+            let needs = tile.needs.as_deref().unwrap_or("Своя копия игры");
+            let text = format!(
+                "{} работает через бесплатный лаунчер {}, его нужно загрузить. Игра выбирается уже в нём.\nНужно: {needs}. OTIUM её не скачивает: лаунчер сам найдёт игру на диске или попросит указать папку.",
+                tile.name, item.name
+            );
+            return self.open(Modal::Confirm { title: tile.name.clone(), text, yes: SetKey::StoreVia, yes_label: "Загрузить лаунчер", focus: 1 });
+        }
+        self.folder_open();
+    }
+
+    fn folder_open(&mut self) {
         // from the last place chosen, if it's still there
         self.shop.folder = Some(PathBuf::from(self.lib.setting_str("storeDir"))).filter(|d| d.is_dir());
         self.modal_at = std::time::Instant::now();
@@ -196,6 +225,12 @@ impl App {
 
     fn folder_chosen(&mut self) {
         let (Some(root), Some(item)) = (self.shop.folder.clone(), self.current_item()) else { return };
+        if self.shop.via {
+            // what it needs was said before the folder was chosen
+            self.shop.chosen = Some(root);
+            self.modal = None;
+            return self.store_install(&item);
+        }
         let mut text = format!("Скачается с GitHub автора ({}) в {}.", item.repo, root.join(&item.id).display());
         if let Some(n) = &item.needs {
             text = format!("Нужно: {n}. OTIUM этого не скачивает: программа попросит указать файлы сама.\n{text}");
@@ -206,7 +241,8 @@ impl App {
 
     /// Y on an installed game's tile.
     pub(super) fn shop_menu(&mut self, i: usize) {
-        let Some(item) = self.shop_items().get(i).cloned() else { return };
+        let Some(tile) = self.shop_items().get(i).cloned() else { return };
+        let item = self.store_target(&tile);
         if self.store_version(&item.id).is_none() || self.shop.busy.as_ref().is_some_and(|b| b.0 == item.id) {
             return;
         }
@@ -223,7 +259,7 @@ impl App {
 
     fn current_item(&self) -> Option<Item> {
         let id = self.shop.current.as_ref()?;
-        self.shop.items.iter().find(|i| i.id == *id).cloned()
+        self.shop.all.iter().find(|i| i.id == *id).cloned()
     }
 
     /// A row of that menu, or the answer to one of the questions.
@@ -233,6 +269,7 @@ impl App {
             return;
         };
         match key {
+            SetKey::StoreVia => self.folder_open(),
             SetKey::StorePlay => {
                 self.modal = None;
                 self.store_play(&item);
@@ -285,7 +322,7 @@ impl App {
 
     pub(super) fn on_store_event(&mut self, e: Event) {
         match e {
-            Event::StoreCatalog(items) => self.shop.items = items,
+            Event::StoreCatalog(items) => self.set_catalog(items),
             Event::StoreLatest { id, version } => {
                 self.shop.latest.insert(id, version);
             }
@@ -296,7 +333,7 @@ impl App {
             }
             Event::StoreDone { id, res } => {
                 self.shop.busy = None;
-                let name = self.shop.items.iter().find(|i| i.id == id).map_or(id.clone(), |i| i.name.clone());
+                let name = self.shop.all.iter().find(|i| i.id == id).map_or(id.clone(), |i| i.name.clone());
                 match res {
                     Ok(done) => {
                         self.store_installed(&id, &name, done);
@@ -316,7 +353,7 @@ impl App {
             m.insert(id.to_string(), stored);
         }
         self.shop.latest.remove(id);
-        let args = self.shop.items.iter().find(|i| i.id == id).map(|i| i.args.clone()).unwrap_or_default();
+        let args = self.shop.all.iter().find(|i| i.id == id).map(|i| i.args.clone()).unwrap_or_default();
         self.ensure_store_game(id, name, &done.exe.to_string_lossy(), &args);
         self.save();
         self.refresh(None);

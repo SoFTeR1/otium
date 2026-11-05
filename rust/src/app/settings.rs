@@ -212,7 +212,7 @@ impl App {
             }
             SetKey::Account => return self.open_settings(SetMenu::Account, 0),
             SetKey::Backgrounds => return self.open_settings(SetMenu::Backgrounds, 0),
-            SetKey::FolderRow | SetKey::StoreInstall | SetKey::StorePlay | SetKey::StoreUpdate | SetKey::StoreFolder | SetKey::StoreRemove | SetKey::StoreRemoved => {}
+            SetKey::FolderRow | SetKey::StoreVia | SetKey::StoreInstall | SetKey::StorePlay | SetKey::StoreUpdate | SetKey::StoreFolder | SetKey::StoreRemove | SetKey::StoreRemoved => {}
             SetKey::BgMode | SetKey::BgTrailers | SetKey::BgSlide | SetKey::BgAdd | SetKey::BgRemove => {}
             SetKey::Discord => return self.open_settings(SetMenu::Discord, 0),
             SetKey::Power => return self.open_settings(SetMenu::Power, 0),
@@ -415,7 +415,7 @@ impl App {
         if key == SetKey::GroupLeave {
             return self.group_confirmed();
         }
-        if matches!(key, SetKey::StoreInstall | SetKey::StoreRemoved) {
+        if matches!(key, SetKey::StoreInstall | SetKey::StoreRemoved | SetKey::StoreVia) {
             return self.shop_setting(key);
         }
         use std::os::windows::process::CommandExt;

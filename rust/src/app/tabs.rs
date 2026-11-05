@@ -112,11 +112,13 @@ impl App {
                     name: i.name.clone(),
                     kicker: i.kind.clone(),
                     about: i.about.clone(),
-                    note: Some(match (self.store_version(&i.id), self.store_update(i), &i.needs) {
-                        (Some(_), Some(new), _) => format!("Установлена · есть версия {new}"),
-                        (Some(v), None, _) => format!("Установлена · версия {v}"),
-                        (None, _, Some(n)) => format!("Нужно: {n}"),
-                        (None, _, None) => "Ничего больше не нужно — бесплатно и с открытым кодом".to_string(),
+                    note: Some(match (&i.via, self.store_version(&self.store_target(i).id), self.store_update(i), &i.needs) {
+                        (Some(_), Some(_), _, _) => format!("Лаунчер {} установлен", self.store_target(i).name),
+                        (Some(_), None, _, n) => format!("Нужен лаунчер {} · {}", self.store_target(i).name, n.as_deref().unwrap_or("своя копия игры").to_lowercase()),
+                        (None, Some(_), Some(new), _) => format!("Установлена · есть версия {new}"),
+                        (None, Some(v), None, _) => format!("Установлена · версия {v}"),
+                        (None, None, _, Some(n)) => format!("Нужно: {n}"),
+                        (None, None, _, None) => "Ничего больше не нужно — бесплатно и с открытым кодом".to_string(),
                     }),
                     color: rgb(i.color),
                 })
@@ -165,7 +167,7 @@ impl App {
     }
 
     fn tab_has_menu(&self) -> bool {
-        self.tabs.tab == Tab::Store && self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&i.id).is_some())
+        self.tabs.tab == Tab::Store && self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&self.store_target(i).id).is_some())
     }
 
     pub(super) fn tab_hover(&mut self, i: usize) {
@@ -301,9 +303,11 @@ impl App {
     pub(super) fn tab_hints(&self) -> Vec<(usize, &'static str)> {
         match self.tabs.tab {
             Tab::Store => {
-                let installed = self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&i.id).is_some());
-                if installed {
+                let item = self.shop.items.get(self.tabs.store_sel);
+                if self.tab_has_menu() {
                     vec![(0, "Запустить"), (2, "Параметры"), (1, "Назад")]
+                } else if item.is_some_and(|i| i.via.is_some()) {
+                    vec![(0, "Загрузить лаунчер"), (1, "Назад")]
                 } else {
                     vec![(0, "Установить"), (1, "Назад")]
                 }
@@ -381,7 +385,8 @@ impl App {
         }
         p.rect_filled(btn, CornerRadius::same((34.0 * s) as u8), if focus { Color32::WHITE } else { white(0.88) });
         let store_item = (self.tabs.tab == Tab::Store).then(|| self.shop.items.get(sel)).flatten();
-        let progress = store_item.and_then(|i| self.shop.busy.as_ref().filter(|b| b.0 == i.id));
+        let store_target = store_item.map(|i| self.store_target(i));
+        let progress = store_target.as_ref().and_then(|t| self.shop.busy.as_ref().filter(|b| b.0 == t.id));
         if let Some((_, _, pct)) = progress {
             let done = Rect::from_min_size(btn.min, vec2(btn.width() * *pct as f32 / 100.0, btn.height()));
             p.rect_filled(done, CornerRadius::same((34.0 * s) as u8), Color32::from_rgb(120, 170, 255));
@@ -391,9 +396,10 @@ impl App {
             Stage::Unpack => format!("Распаковка {pct}%"),
         });
         let label: &str = match self.tabs.tab {
-            Tab::Store => match (&progress_label, store_item.is_some_and(|i| self.store_version(&i.id).is_some())) {
+            Tab::Store => match (&progress_label, store_target.as_ref().is_some_and(|t| self.store_version(&t.id).is_some())) {
                 (Some(l), _) => l,
                 (None, true) => "Запустить",
+                (None, false) if store_item.is_some_and(|i| i.via.is_some()) => "Загрузить лаунчер",
                 (None, false) => "Установить",
             },
             _ if self.tabs.opening.is_some_and(|(id, t)| SERVICES.get(sel).is_some_and(|s| s.id == id) && t.elapsed() < Duration::from_secs(10)) => "Открываем…",

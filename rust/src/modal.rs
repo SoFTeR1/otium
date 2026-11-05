@@ -64,6 +64,7 @@ pub enum SetKey {
     Sounds,
     PadApps,
     FolderRow,
+    StoreVia,
     StoreInstall,
     StorePlay,
     StoreUpdate,
