@@ -60,25 +60,6 @@ fn start() {
         .ok();
 }
 
-/// Settings value -> volume: `settings.ambient` = "off" | "low" | "mid" | "high".
-pub fn level(setting: &str) -> f32 {
-    match setting {
-        "off" => 0.0,
-        "low" => 0.35,
-        "high" => 0.8,
-        _ => 0.55,
-    }
-}
-
-pub fn level_name(setting: &str) -> &'static str {
-    match setting {
-        "off" => "Выкл",
-        "low" => "Тихо",
-        "high" => "Громко",
-        _ => "Средне",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     /// The built-in track (if any) decodes and has sound in it.

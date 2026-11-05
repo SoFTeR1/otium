@@ -1,7 +1,7 @@
 //! Settings screens, the power menu, tray / close handling and the Discord status.
 
 use super::App;
-use crate::input::PadKind;
+use crate::input::{Nav, PadKind};
 use crate::keyboard::{Keyboard, Outcome, Target};
 use crate::modal::{Modal, SetItem, SetKey, SetMenu};
 use serde_json::{json, Value};
@@ -76,9 +76,9 @@ impl App {
                         item(SetKey::PadApps, "Геймпад в «Медиа»", if s.setting_bool("padApps", true) { "Мышь и кнопки" } else { "Выкл (мышь даёт Steam)" }),
                         item(SetKey::Backgrounds, "Фоны", if s.setting_str("bgMode") == "global" { "Общий фон" } else { "Арт игры" }),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
-                        item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { crate::ambient::level_name(s.setting_str("ambient")) } else { "нет в этой сборке" }),
+                        item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { self.volume_text(SetKey::Ambient) } else { "нет в этой сборке".to_string() }),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
-                        item(SetKey::SplashSound, "Звук заставки", crate::sound::level_name(s.setting_str("splashSound"))),
+                        item(SetKey::SplashSound, "Звук заставки", self.volume_text(SetKey::SplashSound)),
                         item(SetKey::Fullscreen, "Полноэкранный режим", onoff(self.fullscreen)),
                         item(SetKey::Autostart, "Запускать вместе с Windows", onoff(s.setting_bool("autostart", false))),
                         item(SetKey::Tray, "При закрытии окна", if s.setting_bool("closeToTray", true) { "Свернуть в трей" } else { "Выйти" }),
@@ -164,6 +164,58 @@ impl App {
         self.open(Modal::Keyboard(Box::new(Keyboard::new(title, text, target, max, secret))));
     }
 
+    /// The volume of the splash chord or the background music, in percent.
+    pub(super) fn volume_percent(&self, key: SetKey) -> u32 {
+        let stored = |k: &str| self.lib.settings.get(k).and_then(Value::as_u64).map(|v| v.min(100) as u32);
+        match key {
+            SetKey::SplashSound => stored("splashVolume").unwrap_or(30),
+            // the words earlier versions stored
+            _ => stored("ambientVolume").unwrap_or(match self.lib.setting_str("ambient") {
+                "off" => 0,
+                "low" => 30,
+                "high" => 80,
+                _ => 50,
+            }),
+        }
+    }
+
+    fn volume_text(&self, key: SetKey) -> String {
+        match self.volume_percent(key) {
+            0 => "Выкл".to_string(),
+            p => format!("{p}%"),
+        }
+    }
+
+    fn volume_change(&mut self, key: SetKey, percent: u32) {
+        match key {
+            SetKey::SplashSound => {
+                // let the new level be heard
+                if percent > 0 {
+                    crate::sound::play_gain(crate::sound::Sfx::Splash, crate::sound::splash_gain(percent));
+                }
+                self.set("splashVolume", percent);
+            }
+            _ if crate::ambient::available() => self.set("ambientVolume", percent),
+            _ => {}
+        }
+    }
+
+    /// Left / Right on a volume row of the main menu. True when that's what happened.
+    pub(super) fn volume_nav(&mut self, nav: Nav) -> bool {
+        let Some(Modal::Settings { menu: SetMenu::Main, items, focus, .. }) = &self.modal else { return false };
+        let (focus, key) = (*focus, items[*focus].key);
+        if !matches!(key, SetKey::SplashSound | SetKey::Ambient) {
+            return false;
+        }
+        let step = if nav == Nav::Right { 10 } else { -10 };
+        let (cur, next) = (self.volume_percent(key), next_percent(self.volume_percent(key), step, false));
+        if next != cur {
+            self.volume_change(key, next);
+            self.open_settings(SetMenu::Main, focus);
+        }
+        true
+    }
+
     pub(super) fn apply_setting(&mut self, menu: SetMenu, key: SetKey, focus: usize) {
         if matches!(menu, SetMenu::Profile | SetMenu::Friend) {
             return self.social_setting(key);
@@ -235,31 +287,7 @@ impl App {
                 let next = cycle(self.lib.setting_str("padLayout"), &["auto", "ps", "xbox"]);
                 self.set("padLayout", next);
             }
-            SetKey::SplashSound => {
-                let cur = match self.lib.setting_str("splashSound") {
-                    "" => "mid",
-                    x => x,
-                }
-                .to_string();
-                let next = cycle(&cur, &["off", "low", "mid", "high"]);
-                // let the new level be heard
-                let gain = crate::sound::splash_gain(&next);
-                if gain > 0.0 {
-                    crate::sound::play_gain(crate::sound::Sfx::Splash, gain);
-                }
-                self.set("splashSound", next);
-            }
-            SetKey::Ambient => {
-                if crate::ambient::available() {
-                    let cur = match self.lib.setting_str("ambient") {
-                        "" => "mid",
-                        x => x,
-                    }
-                    .to_string();
-                    let next = cycle(&cur, &["off", "low", "mid", "high"]);
-                    self.set("ambient", next);
-                }
-            }
+            SetKey::SplashSound | SetKey::Ambient => self.volume_change(key, next_percent(self.volume_percent(key), 10, true)),
             SetKey::VpnKino => self.vpn_setting_next(),
             SetKey::KinoVpnOff | SetKey::KinoVpnKeep | SetKey::KinoVpnAlways => self.vpn_choice(key),
             SetKey::PadApps => {
@@ -641,4 +669,22 @@ impl App {
         self.input.set_cal(self.lib.settings.get("padCal"));
         self.padmouse.set_cal(&crate::input::parse_cal(self.lib.settings.get("padCal")));
     }
+}
+
+/// A volume after one step: 10% at a time, on the 10s. `wrap`: past the top it starts over from "off".
+fn next_percent(cur: u32, step: i32, wrap: bool) -> u32 {
+    let next = (cur as i32 / 10) * 10 + step;
+    match (next > 100, wrap) {
+        (true, true) => 0,
+        _ => next.clamp(0, 100) as u32,
+    }
+}
+
+#[test]
+fn volume_steps() {
+    assert_eq!(next_percent(30, 10, true), 40);
+    assert_eq!(next_percent(100, 10, true), 0);
+    assert_eq!(next_percent(100, 10, false), 100);
+    assert_eq!(next_percent(0, -10, false), 0);
+    assert_eq!(next_percent(35, 10, false), 40);
 }

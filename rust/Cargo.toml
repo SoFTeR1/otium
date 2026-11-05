@@ -1,6 +1,6 @@
 [package]
 name = "otium"
-version = "3.4.0"
+version = "3.4.1"
 edition = "2021"
 build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
@@ -77,3 +77,6 @@ panic = "abort"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[build-dependencies]
+winresource = "0.1"

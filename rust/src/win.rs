@@ -621,3 +621,9 @@ pub fn drives() -> Vec<(PathBuf, String)> {
     }
     out
 }
+
+/// Tells the shell icons have changed: shortcuts to an updated exe show its new icon at once.
+pub fn refresh_icons() {
+    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+    unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+}

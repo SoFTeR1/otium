@@ -304,21 +304,7 @@ mod tests {
     }
 }
 
-/// `settings.splashSound` = "off" | "low" | "mid" | "high" -> gain of the splash chord.
-pub fn splash_gain(setting: &str) -> f32 {
-    match setting {
-        "off" => 0.0,
-        "low" => 0.6,
-        "high" => 1.8,
-        _ => 1.1,
-    }
-}
-
-pub fn level_name(setting: &str) -> &'static str {
-    match setting {
-        "off" => "Выкл",
-        "low" => "Тихо",
-        "high" => "Громко",
-        _ => "Средне",
-    }
+/// `settings.splashVolume` in percent -> gain of the splash chord (100% is its loudest).
+pub fn splash_gain(percent: u32) -> f32 {
+    1.8 * percent.min(100) as f32 / 100.0
 }

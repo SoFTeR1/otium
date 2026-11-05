@@ -1,6 +1,6 @@
 //! Embeds the launcher's background music, if there is one: `assets/ambient.ogg` or
 //! `assets/ambient.mp3` (the first found) goes into the exe; without it the build still works and
-//! OTIUM simply plays nothing.
+//! OTIUM simply plays nothing. Also embeds the exe's icon.
 
 use std::path::Path;
 
@@ -19,4 +19,8 @@ fn main() {
     }
     std::fs::write(&out, &bytes).unwrap();
     println!("cargo:rustc-env=OTIUM_AMBIENT_KIND={kind}");
+
+    // the icon Windows shows for the exe and for shortcuts to it
+    println!("cargo:rerun-if-changed=assets/icon.ico");
+    winresource::WindowsResource::new().set_icon("assets/icon.ico").compile().expect("embedding the icon");
 }

@@ -4,7 +4,7 @@
 use crate::data::{image_uri, Game, Library};
 use crate::draw::{self, black, bold, font, semibold, white};
 use crate::input::{Input, Nav, PadKind};
-use crate::modal::{Action, Modal};
+use crate::modal::{Action, Modal, SetKey};
 use crate::steam::{self, LocalStat};
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect, Stroke, StrokeKind};
 use std::collections::{HashMap, HashSet};
@@ -249,7 +249,7 @@ impl App {
         crate::padmouse::start(app.padmouse.clone());
         app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
-        let gain = crate::sound::splash_gain(app.lib.setting_str("splashSound"));
+        let gain = crate::sound::splash_gain(app.volume_percent(SetKey::SplashSound));
         if app.splash_start.is_some() && gain > 0.0 && !crate::tray::started_at_login() {
             crate::sound::play_gain(crate::sound::Sfx::Splash, gain);
         }
@@ -359,6 +359,10 @@ impl App {
         }
         if matches!(self.modal, Some(Modal::Friend { .. })) {
             return self.friend_profile_nav(nav);
+        }
+        // left and right change a volume row in place
+        if matches!(nav, Nav::Left | Nav::Right) && self.volume_nav(nav) {
+            return;
         }
         // B in the folder chooser goes one level up
         if nav == Nav::Back && matches!(self.modal, Some(Modal::Settings { menu: crate::modal::SetMenu::Folder, .. })) {
@@ -569,14 +573,13 @@ impl App {
         if !crate::ambient::available() {
             return;
         }
-        let setting = self.lib.setting_str("ambient");
         let busy = self.splash_start.is_some()
             || self.launching.is_some()
             || self.calls.call.state != crate::app::calls::CallState::Idle
             || self.calls.room.is_some()
             || self.calls.ring.is_some()
             || self.pages.music.as_ref().is_some_and(|m| m.playing);
-        crate::ambient::set(front && !busy, crate::ambient::level(setting));
+        crate::ambient::set(front && !busy, self.volume_percent(SetKey::Ambient) as f32 / 100.0);
     }
 
     fn toast(&mut self, text: &str, error: bool) {

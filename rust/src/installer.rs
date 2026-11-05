@@ -174,6 +174,7 @@ fn self_update(target: &Path, pid: Option<u32>) {
     if std::env::var_os("OTIUM_INSTALL_NO_RUN").is_some() {
         return;
     }
+    crate::win::refresh_icons();
     if let Some(dir) = target.parent() {
         if let Ok(un) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(format!("{UNINSTALL}\\{OUR_KEY}"), KEY_SET_VALUE) {
             let _ = un.set_value("DisplayVersion", &crate::update::current());
@@ -295,6 +296,7 @@ fn shortcuts(exe: &Path, fresh: bool) {
             crate::win::write_shortcut(&path, exe);
         }
     }
+    crate::win::refresh_icons();
 }
 
 /// The Electron build registered autostart under its own name; keep one entry, ours, pointing at
