@@ -25,6 +25,7 @@ mod run;
 pub use calls::PickFor;
 mod settings;
 mod tabs;
+mod vpnui;
 pub(crate) use tabs::Tab;
 mod social;
 pub use pages::fmt_date;
@@ -136,6 +137,9 @@ pub struct App {
     reorder: bool,
     /// the Media and Store tabs
     tabs: tabs::Tabs,
+    /// the pad as mouse and keys inside the Media service windows
+    padmouse: Arc<crate::padmouse::Shared>,
+    vpn: vpnui::Vpn,
 }
 
 impl App {
@@ -226,9 +230,14 @@ impl App {
             edit_id: None,
             reorder: false,
             tabs: Default::default(),
+            padmouse: Default::default(),
+            vpn: vpnui::Vpn::new(),
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));
+        app.padmouse.on.store(app.lib.setting_bool("padApps", true), Ordering::Relaxed);
+        app.padmouse.set_cal(&crate::input::parse_cal(app.lib.settings.get("padCal")));
+        crate::padmouse::start(app.padmouse.clone());
         app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
         let gain = crate::sound::splash_gain(app.lib.setting_str("splashSound"));

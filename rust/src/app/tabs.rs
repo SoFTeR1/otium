@@ -167,6 +167,14 @@ impl App {
     }
 
     fn open_service(&mut self, i: usize) {
+        let open = SERVICES.get(i).is_some_and(|s| self.service_open(s.id));
+        if !open && self.vpn_before(i) {
+            return;
+        }
+        self.open_service_now(i);
+    }
+
+    pub(super) fn open_service_now(&mut self, i: usize) {
         let Some(s) = SERVICES.get(i) else { return };
         // already open: bring it back
         if let Some(&(_, h)) = self.tabs.windows.iter().find(|(id, h)| *id == s.id && crate::win::is_window(*h)) {
@@ -182,12 +190,26 @@ impl App {
             eprintln!("open service (suppressed): {} {}", s.id, s.url);
             return self.toast(&format!("Открываем {}", s.name), false);
         }
+        // still open from before OTIUM restarted: take it over
+        if let Some((pid, h)) = services::left_open(s) {
+            attach(s, false);
+            self.on_service_event(Event::ServiceWindow { id: s.id, hwnd: h });
+            let (bus, id) = (self.bus.clone(), s.id);
+            std::thread::spawn(move || {
+                while crate::win::alive(pid) {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                bus.send(Event::ServiceClosed { id, secs: 60 });
+            });
+            return;
+        }
         let mut child = match services::launch(s) {
             Ok(c) => c,
             Err(e) => return self.toast(&e, true),
         };
         self.toast(&format!("Открываем {}…", s.name), false);
         self.tabs.opening = Some((s.id, Instant::now()));
+        attach(s, true);
         let (bus, id, pid) = (self.bus.clone(), s.id, child.id());
         std::thread::spawn(move || {
             let at = Instant::now();
@@ -201,7 +223,6 @@ impl App {
                     if let Some(h) = crate::win::main_window(pid) {
                         shown = true;
                         bus.send(Event::ServiceWindow { id, hwnd: h });
-                        std::thread::spawn(move || services::make_fullscreen(h));
                     }
                 }
                 std::thread::sleep(Duration::from_millis(if shown { 1000 } else { 250 }));
@@ -216,6 +237,10 @@ impl App {
                 self.tabs.opening = None;
                 self.tabs.windows.retain(|(s, _)| *s != id);
                 self.tabs.windows.push((id, hwnd));
+                let mode = if SERVICES.iter().any(|s| s.id == id && s.tv) { crate::padmouse::Mode::Keys } else { crate::padmouse::Mode::Mouse };
+                let pid = crate::win::window_pid(hwnd);
+                self.padmouse.windows.lock().unwrap().retain(|(p, _)| *p != pid);
+                self.padmouse.windows.lock().unwrap().push((pid, mode));
                 // like a game: Guide comes back to OTIUM, "Вернуться" goes back to the window
                 self.game_hwnd = hwnd;
                 self.away_for_game = true;
@@ -226,7 +251,9 @@ impl App {
                     self.tabs.opening = None;
                 }
                 let had = self.tabs.windows.iter().find(|(s, _)| *s == id).map(|(_, h)| *h);
+                self.vpn_service_closed(id);
                 self.tabs.windows.retain(|(s, _)| *s != id);
+                self.padmouse.windows.lock().unwrap().retain(|(p, _)| crate::win::alive(*p) && had.is_none_or(|h| crate::win::window_pid(h) != *p));
                 if let Some(h) = had {
                     if self.game_hwnd == h {
                         self.game_hwnd = 0;
@@ -381,6 +408,32 @@ impl App {
         }
         out
     }
+}
+
+/// Takes the service's window over through DevTools: fullscreen, and for a TV site the pose as a
+/// TV (the session stays open while the window lives: the override ends with it). `open`: a new
+/// window, load the TV site in it; an old one keeps its page.
+fn attach(s: &'static services::Service, open: bool) {
+    std::thread::spawn(move || {
+        let dir = services::profile_dir(s.id);
+        let res = crate::cdp::port(&dir, Duration::from_secs(20))
+            .and_then(|p| crate::cdp::page(p, Duration::from_secs(10)))
+            .ok_or_else(|| "DevTools: no port".to_string())
+            .and_then(|u| crate::cdp::Session::connect(&u));
+        let mut sess = match res {
+            Ok(x) => x,
+            Err(e) => return eprintln!("service {}: {e}", s.id),
+        };
+        if s.tv {
+            if let Err(e) = crate::cdp::pose_as(&mut sess, services::TV_AGENTS[0], open.then_some(s.url)) {
+                eprintln!("service {}: {e}", s.id);
+            }
+        }
+        if let Err(e) = crate::cdp::fullscreen(&mut sess) {
+            eprintln!("service {}: {e}", s.id);
+        }
+        sess.hold();
+    });
 }
 
 fn paint_entry_tile(p: &egui::Painter, e: &Entry, r: Rect, radius: f32, alpha: f32, focused: bool, s: f32) {

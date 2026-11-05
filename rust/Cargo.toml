@@ -1,6 +1,6 @@
 [package]
 name = "otium"
-version = "3.1.0"
+version = "3.2.0"
 edition = "2021"
 build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
@@ -39,6 +39,9 @@ windows = { version = "0.58", features = [
     "Win32_System_Memory",
     "Win32_Security",
     "Win32_Media_Audio",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
     "Win32_Media_Audio_Endpoints",
     "Win32_Storage_FileSystem",
     "Foundation",
@@ -46,6 +49,7 @@ windows = { version = "0.58", features = [
     "Storage_Streams",
 ] }
 ureq = { version = "2", features = ["json"] }
+tungstenite = "0.28"
 regex = "1"
 rodio = { version = "0.19", default-features = false, features = ["vorbis", "symphonia-mp3"] }
 tray-icon = "0.19"

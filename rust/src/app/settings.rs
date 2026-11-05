@@ -72,6 +72,8 @@ impl App {
                         item(SetKey::Sort, "Порядок игр", sort),
                         item(SetKey::Layout, "Кнопки геймпада", layout),
                         item(SetKey::PadTest, "Геймпад: проверка и калибровка", pad),
+                        item(SetKey::VpnKino, "VPN для Кинопоиска", self.vpn_setting_value()),
+                        item(SetKey::PadApps, "Геймпад в «Медиа»", if s.setting_bool("padApps", true) { "Мышь и кнопки" } else { "Выкл (мышь даёт Steam)" }),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
                         item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { crate::ambient::level_name(s.setting_str("ambient")) } else { "нет в этой сборке" }),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
@@ -132,7 +134,7 @@ impl App {
             SetMenu::Edit => return self.open_editor(focus),
             SetMenu::Timer => self.timer_items(),
             // built by search_text
-            SetMenu::Search => return,
+            SetMenu::Search | SetMenu::Vpn => return,
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -178,6 +180,9 @@ impl App {
         }
         if menu == SetMenu::Search {
             return self.search_pick(focus);
+        }
+        if menu == SetMenu::Vpn {
+            return self.vpn_choice(key);
         }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
@@ -240,6 +245,13 @@ impl App {
                     let next = cycle(&cur, &["off", "low", "mid", "high"]);
                     self.set("ambient", next);
                 }
+            }
+            SetKey::VpnKino => self.vpn_setting_next(),
+            SetKey::KinoVpnOff | SetKey::KinoVpnKeep | SetKey::KinoVpnAlways => self.vpn_choice(key),
+            SetKey::PadApps => {
+                let v = !self.lib.setting_bool("padApps", true);
+                self.padmouse.on.store(v, std::sync::atomic::Ordering::Relaxed);
+                self.set("padApps", v);
             }
             SetKey::Sounds => {
                 let v = !self.sounds_on();
@@ -604,5 +616,6 @@ impl App {
         }
         self.save();
         self.input.set_cal(self.lib.settings.get("padCal"));
+        self.padmouse.set_cal(&crate::input::parse_cal(self.lib.settings.get("padCal")));
     }
 }

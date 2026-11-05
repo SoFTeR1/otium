@@ -200,6 +200,7 @@ pub mod ic {
     pub const MUSIC: &str = "\u{E8D6}";
     pub const SEARCH: &str = "\u{E721}";
     pub const DOWNLOAD: &str = "\u{E896}";
+    pub const SHIELD: &str = "\u{EA18}";
 }
 
 pub fn white(a: f32) -> Color32 {

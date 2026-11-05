@@ -37,6 +37,7 @@ pub enum CtlAction {
     Settings,
     Minimize,
     Power,
+    Vpn,
 }
 
 enum Pic {
@@ -227,6 +228,7 @@ fn app_icon(exe: &std::path::Path) -> PathBuf {
 impl App {
     pub(super) fn open_control(&mut self) {
         let _ = self.media_tx.send(MediaCmd::Poll);
+        self.vpn_refresh();
         self.open(Modal::Control { focus: 0, scroll: 0.0, mixer: None });
     }
 
@@ -311,6 +313,14 @@ impl App {
         let unread = self.social_unread();
         let friends = if unread > 0 { format!("Друзья · {unread}") } else { "Друзья".into() };
         t.push(tile(CtlAction::Social, ic::CHAT, &friends, "Друзья и сообщения"));
+        if self.vpn.exe.is_some() {
+            let (label, hint) = match (self.vpn.busy, self.vpn.on) {
+                (true, _) => ("VPN…", "Переключаю VPN"),
+                (false, true) => ("VPN вкл", "Выключить VPN"),
+                (false, false) => ("VPN выкл", "Включить VPN"),
+            };
+            t.push(Tile { off: !self.vpn.on, ..tile(CtlAction::Vpn, ic::SHIELD, label, hint) });
+        }
         t.push(tile(CtlAction::Mixer, ic::VOLUME, "Звук", "Громкость приложений"));
         match self.timer.left() {
             Some(left) => t.push(Tile { off: true, ..tile(CtlAction::Timer, ic::TIMER, &fmt_left(left), &format!("Таймер: ПК {} через {}", self.timer.what(), fmt_left(left))) }),
@@ -446,6 +456,12 @@ impl App {
                 self.pending_cmd.push(egui::ViewportCommand::Minimized(true));
             }
             CtlAction::Power => self.open_settings(SetMenu::Power, 0),
+            CtlAction::Vpn => {
+                // a switch from here never opens a service that was waiting for an answer
+                self.vpn_cancel_pending();
+                let on = !self.vpn.on;
+                self.vpn_switch(on);
+            }
         }
     }
 

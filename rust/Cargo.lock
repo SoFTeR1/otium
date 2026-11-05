@@ -3950,7 +3950,7 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 
 [[package]]
 name = "otium"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3977,6 +3977,7 @@ dependencies = [
  "sonora",
  "tokio",
  "tray-icon",
+ "tungstenite",
  "ureq",
  "uuid",
  "webrtc",

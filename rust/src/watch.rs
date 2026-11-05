@@ -46,6 +46,8 @@ pub enum Event {
     /// a Media tab service window appeared / its browser exited (after `secs` seconds)
     ServiceWindow { id: &'static str, hwnd: isize },
     ServiceClosed { id: &'static str, secs: u64 },
+    /// a VPN switch finished: what was asked, and the state the tunnel ended up in
+    VpnDone { wanted: bool, res: Result<bool, String> },
 }
 
 /// Sends events to the UI and wakes it up.
@@ -69,20 +71,20 @@ impl Bus {
 
 #[repr(C)]
 #[derive(Default)]
-struct XState {
-    packet: u32,
-    buttons: u16,
-    lt: u8,
-    rt: u8,
-    lx: i16,
-    ly: i16,
-    rx: i16,
-    ry: i16,
+pub(crate) struct XState {
+    pub packet: u32,
+    pub buttons: u16,
+    pub lt: u8,
+    pub rt: u8,
+    pub lx: i16,
+    pub ly: i16,
+    pub rx: i16,
+    pub ry: i16,
 }
 
-type GetStateEx = unsafe extern "system" fn(u32, *mut XState) -> u32;
+pub(crate) type GetStateEx = unsafe extern "system" fn(u32, *mut XState) -> u32;
 
-fn load_get_state_ex() -> Option<GetStateEx> {
+pub(crate) fn load_get_state_ex() -> Option<GetStateEx> {
     use windows::core::{PCSTR, PCWSTR};
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     for dll in ["xinput1_4.dll", "xinput1_3.dll"] {
