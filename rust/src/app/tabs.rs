@@ -4,7 +4,8 @@
 use super::{ease_out, App, Zone};
 use crate::draw::{self, bold, font, semibold, white};
 use crate::input::Nav;
-use crate::services::{self, SERVICES, STORE};
+use crate::services::{self, SERVICES};
+use crate::store::Stage;
 use crate::watch::Event;
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect, Stroke, StrokeKind};
 use std::time::{Duration, Instant};
@@ -38,9 +39,9 @@ pub struct Tabs {
 
 /// One tile of a tab: what the painter needs.
 struct Entry {
-    name: &'static str,
-    kicker: &'static str,
-    about: &'static str,
+    name: String,
+    kicker: String,
+    about: String,
     note: Option<String>,
     color: Color32,
 }
@@ -59,6 +60,9 @@ impl App {
             self.tabs.prev_color = self.tab_color();
             self.tabs.changed = Some(Instant::now());
             self.tabs.tab = t;
+            if t == Tab::Store {
+                self.shop_opened();
+            }
             self.tabs.scroll = 0.0;
             self.tabs.focus = self.tab_sel() as f32;
         }
@@ -93,22 +97,26 @@ impl App {
             Tab::Media => SERVICES
                 .iter()
                 .map(|s| Entry {
-                    name: s.name,
-                    kicker: "Приложение",
-                    about: s.about,
+                    name: s.name.into(),
+                    kicker: "Приложение".into(),
+                    about: s.about.into(),
                     note: self.service_open(s.id).then(|| "● Открыто".to_string()),
                     color: rgb(s.color),
                 })
                 .collect(),
-            Tab::Store => STORE
+            Tab::Store => self
+                .shop
+                .items
                 .iter()
                 .map(|i| Entry {
-                    name: i.name,
-                    kicker: i.kind,
-                    about: i.about,
-                    note: Some(match i.needs {
-                        Some(n) => format!("Нужно: {n}"),
-                        None => "Ничего не нужно — бесплатно и с открытым кодом".to_string(),
+                    name: i.name.clone(),
+                    kicker: i.kind.clone(),
+                    about: i.about.clone(),
+                    note: Some(match (self.store_version(&i.id), self.store_update(i), &i.needs) {
+                        (Some(_), Some(new), _) => format!("Установлена · есть версия {new}"),
+                        (Some(v), None, _) => format!("Установлена · версия {v}"),
+                        (None, _, Some(n)) => format!("Нужно: {n}"),
+                        (None, _, None) => "Ничего больше не нужно — бесплатно и с открытым кодом".to_string(),
                     }),
                     color: rgb(i.color),
                 })
@@ -136,7 +144,13 @@ impl App {
             (Zone::Row, Nav::Right) if sel + 1 < n => self.set_tab_sel(sel + 1),
             (Zone::Row, Nav::Down) => self.zone = Zone::Play,
             (Zone::Row | Zone::Play, Nav::Ok) => self.tab_activate(),
+            (_, Nav::Options) if self.tabs.tab == Tab::Store => self.shop_menu(sel),
             (Zone::Play, Nav::Up | Nav::Back) => self.zone = Zone::Row,
+            // the Store's installed games have a menu next to the button
+            (Zone::Play, Nav::Right) if self.tab_has_menu() => self.zone = Zone::More,
+            (Zone::More, Nav::Left) => self.zone = Zone::Play,
+            (Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
+            (Zone::More, Nav::Ok) => self.shop_menu(sel),
             // B on the row goes back to the games
             (Zone::Row, Nav::Back) => self.set_tab(Tab::Games),
             _ => {}
@@ -150,6 +164,10 @@ impl App {
         self.zone = Zone::Top(i);
     }
 
+    fn tab_has_menu(&self) -> bool {
+        self.tabs.tab == Tab::Store && self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&i.id).is_some())
+    }
+
     pub(super) fn tab_hover(&mut self, i: usize) {
         self.set_tab_sel(i);
         self.zone = Zone::Row;
@@ -158,10 +176,7 @@ impl App {
     fn tab_activate(&mut self) {
         match self.tabs.tab {
             Tab::Media => self.open_service(self.tabs.media_sel),
-            Tab::Store => {
-                let name = STORE.get(self.tabs.store_sel).map_or("", |i| i.name);
-                self.toast(&format!("Магазин пока тестовый: установка «{name}» появится в следующих версиях"), false);
-            }
+            Tab::Store => self.shop_activate(self.tabs.store_sel),
             Tab::Games => {}
         }
     }
@@ -285,7 +300,14 @@ impl App {
 
     pub(super) fn tab_hints(&self) -> Vec<(usize, &'static str)> {
         match self.tabs.tab {
-            Tab::Store => vec![(0, "Установить"), (1, "Назад")],
+            Tab::Store => {
+                let installed = self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&i.id).is_some());
+                if installed {
+                    vec![(0, "Запустить"), (2, "Параметры"), (1, "Назад")]
+                } else {
+                    vec![(0, "Установить"), (1, "Назад")]
+                }
+            }
             _ => vec![(0, "Открыть"), (1, "Назад")],
         }
     }
@@ -350,7 +372,7 @@ impl App {
         // ---- title, button, about ----
         let info_y = rect.height() * 0.50;
         p.text(pos2(left + 4.0 * s, info_y - 100.0 * s), Align2::LEFT_BOTTOM, e.kicker.to_uppercase(), semibold(18.0 * s), white(0.6 * appear));
-        p.text(pos2(left, info_y - 10.0 * s), Align2::LEFT_BOTTOM, e.name, bold(72.0 * s), white(appear));
+        p.text(pos2(left, info_y - 10.0 * s), Align2::LEFT_BOTTOM, &e.name, bold(72.0 * s), white(appear));
 
         let btn = Rect::from_min_size(pos2(left, info_y + 20.0 * s), vec2(280.0 * s, 68.0 * s));
         let focus = self.zone == Zone::Play && self.modal.is_none() && !self.social.open;
@@ -358,31 +380,50 @@ impl App {
             draw::glow(p, btn, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
         }
         p.rect_filled(btn, CornerRadius::same((34.0 * s) as u8), if focus { Color32::WHITE } else { white(0.88) });
-        let label = match self.tabs.tab {
-            Tab::Store => "Установить",
+        let store_item = (self.tabs.tab == Tab::Store).then(|| self.shop.items.get(sel)).flatten();
+        let progress = store_item.and_then(|i| self.shop.busy.as_ref().filter(|b| b.0 == i.id));
+        if let Some((_, _, pct)) = progress {
+            let done = Rect::from_min_size(btn.min, vec2(btn.width() * *pct as f32 / 100.0, btn.height()));
+            p.rect_filled(done, CornerRadius::same((34.0 * s) as u8), Color32::from_rgb(120, 170, 255));
+        }
+        let progress_label = progress.map(|(_, stage, pct)| match stage {
+            Stage::Download => format!("Скачиваем {pct}%"),
+            Stage::Unpack => format!("Распаковка {pct}%"),
+        });
+        let label: &str = match self.tabs.tab {
+            Tab::Store => match (&progress_label, store_item.is_some_and(|i| self.store_version(&i.id).is_some())) {
+                (Some(l), _) => l,
+                (None, true) => "Запустить",
+                (None, false) => "Установить",
+            },
             _ if self.tabs.opening.is_some_and(|(id, t)| SERVICES.get(sel).is_some_and(|s| s.id == id) && t.elapsed() < Duration::from_secs(10)) => "Открываем…",
             _ => "Открыть",
         };
         p.text(btn.center(), Align2::CENTER_CENTER, label, semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
         crate::mouse::add(btn, crate::mouse::Hit::Play);
+        if self.tab_has_menu() {
+            let more = Rect::from_center_size(pos2(btn.right() + 58.0 * s, btn.center().y), vec2(68.0 * s, 68.0 * s));
+            crate::mouse::add(more, crate::mouse::Hit::More);
+            let f = self.zone == Zone::More && self.modal.is_none() && !self.social.open;
+            if f {
+                draw::glow(p, more, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
+            }
+            p.circle_filled(more.center(), 34.0 * s, if f { white(0.95) } else { Color32::from_black_alpha(115) });
+            p.circle_stroke(more.center(), 34.0 * s, Stroke::new(1.5_f32, white(0.5)));
+            for dx in [-12.0, 0.0, 12.0] {
+                p.circle_filled(more.center() + vec2(dx * s, 0.0), 3.5 * s, if f { Color32::BLACK } else { Color32::WHITE });
+            }
+        } else if self.zone == Zone::More {
+            self.zone = Zone::Play;
+        }
 
         let mut y = btn.bottom() + 26.0 * s;
         if let Some(n) = &e.note {
             p.text(pos2(left + 4.0 * s, y), Align2::LEFT_TOP, n, font(20.0 * s), white(0.7 * appear));
             y += 34.0 * s;
         }
-        let about = p.layout(e.about.to_string(), font(21.0 * s), white(0.85 * appear), 760.0 * s);
+        let about = p.layout(e.about.clone(), font(21.0 * s), white(0.85 * appear), 760.0 * s);
         p.galley(pos2(left + 4.0 * s, y), about, Color32::WHITE);
-        if self.tabs.tab == Tab::Store {
-            let y = y + 70.0 * s;
-            p.text(
-                pos2(left + 4.0 * s, y),
-                Align2::LEFT_TOP,
-                "Тестовая витрина: каталог, скачивание с GitHub и проверка своих файлов игры появятся позже",
-                font(17.0 * s),
-                white(0.45 * appear),
-            );
-        }
     }
 
     /// The tab names on the left of the top bar; returns their rects for focus and the mouse.
@@ -405,15 +446,7 @@ impl App {
             if cur && !f {
                 p.rect_filled(Rect::from_min_size(pos2(r.left(), r.bottom() + 6.0 * s), vec2(r.width(), 3.0 * s)), CornerRadius::same(2), white(a));
             }
-            if t == Tab::Store {
-                let tg = p.layout_no_wrap("тест".into(), semibold(13.0 * s), Color32::PLACEHOLDER);
-                let b = Rect::from_min_size(pos2(r.right() + 8.0 * s, y - 20.0 * s), tg.size() + vec2(12.0 * s, 4.0 * s));
-                p.rect_filled(b, CornerRadius::same((b.height() / 2.0) as u8), Color32::from_rgb(61, 123, 255).gamma_multiply(a));
-                p.galley(b.min + vec2(6.0 * s, 2.0 * s), tg, white(a));
-                x = b.right() + 30.0 * s;
-            } else {
-                x = r.right() + 36.0 * s;
-            }
+            x = r.right() + 36.0 * s;
             out.push(r.expand2(vec2(18.0 * s, 10.0 * s)));
         }
         out

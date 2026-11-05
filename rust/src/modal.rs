@@ -47,6 +47,8 @@ pub enum SetMenu {
     /// "Кинопоиск не работает через VPN": what to do
     Vpn,
     Backgrounds,
+    /// an installed Store game
+    Store,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -59,6 +61,13 @@ pub enum SetKey {
     Layout,
     Sounds,
     PadApps,
+    StoreDir,
+    StoreInstall,
+    StorePlay,
+    StoreUpdate,
+    StoreFolder,
+    StoreRemove,
+    StoreRemoved,
     Backgrounds,
     BgMode,
     BgTrailers,
@@ -439,10 +448,12 @@ impl Modal {
                 }
             }
             Modal::Confirm { title, text, yes_label, focus, .. } => {
-                let r = panel(ui, screen, s, 620.0, title, 3, appear);
-                let galley = ui.painter().layout(text.clone(), font(19.0 * s), white(0.65 * appear), r.width() - 16.0 * s);
+                // the panel grows with the text (620 minus its padding and the text's own margin)
+                let galley = ui.painter().layout(text.clone(), font(19.0 * s), white(0.65 * appear), (620.0 - 56.0 - 16.0) * s);
+                let text_rows = (galley.size().y / (ROW * s)).ceil().max(1.0) as usize;
+                let r = panel(ui, screen, s, 620.0, title, text_rows + 2, appear);
                 ui.painter().galley(r.left_top() + vec2(8.0 * s, 0.0), galley, Color32::WHITE);
-                let r = Rect::from_min_max(r.min + vec2(0.0, ROW * s), r.max);
+                let r = Rect::from_min_max(r.min + vec2(0.0, text_rows as f32 * ROW * s), r.max);
                 rows(ui, r, s, &["Отмена", yes_label], *focus, appear);
             }
             Modal::Settings { title, items, focus, scroll, .. } => {

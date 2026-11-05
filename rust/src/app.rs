@@ -25,6 +25,7 @@ mod pages;
 mod run;
 pub use calls::PickFor;
 mod settings;
+mod shop;
 mod tabs;
 mod vpnui;
 pub(crate) use tabs::Tab;
@@ -145,6 +146,7 @@ pub struct App {
     padmouse: Arc<crate::padmouse::Shared>,
     vpn: vpnui::Vpn,
     bg: bg::Bg,
+    shop: shop::Shop,
 }
 
 impl App {
@@ -238,6 +240,7 @@ impl App {
             padmouse: Default::default(),
             vpn: vpnui::Vpn::new(),
             bg: Default::default(),
+            shop: Default::default(),
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));

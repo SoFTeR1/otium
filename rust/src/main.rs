@@ -19,6 +19,7 @@ mod modal;
 mod mouse;
 mod sound;
 mod steam;
+mod store;
 mod media;
 mod mixer;
 mod cdp;

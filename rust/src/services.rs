@@ -1,4 +1,4 @@
-//! The Media tab's streaming services and the test catalog of the Store tab.
+//! The Media tab's streaming services.
 //!
 //! A service opens as a fullscreen browser app window (Edge, else Chrome) with a profile of its
 //! own under %LOCALAPPDATA%\OTIUM\Browser: logins stay, the window is a separate process OTIUM
@@ -136,76 +136,6 @@ pub fn left_open(s: &Service) -> Option<(u32, isize)> {
     }
     Some((pid, crate::win::main_window(pid)?))
 }
-
-// ---------- the Store (a test catalog for now: nothing is installed yet) ----------
-
-pub struct StoreItem {
-    pub name: &'static str,
-    pub kind: &'static str,
-    pub about: &'static str,
-    /// what the user has to bring: their own copy of the original game
-    pub needs: Option<&'static str>,
-    pub color: [u8; 3],
-}
-
-pub const STORE: &[StoreItem] = &[
-    StoreItem {
-        name: "Zelda 64: Recompiled",
-        kind: "Рекомпиляция N64",
-        about: "Majora's Mask, переведённая в родной код для ПК: широкий экран, высокая частота кадров, моды",
-        needs: Some("Свой ROM Majora's Mask (США)"),
-        color: [46, 125, 90],
-    },
-    StoreItem {
-        name: "Ship of Harkinian",
-        kind: "Декомпиляция",
-        about: "Ocarina of Time на ПК: улучшенная графика, рандомайзер и сотни настроек",
-        needs: Some("Свой ROM Ocarina of Time"),
-        color: [52, 96, 170],
-    },
-    StoreItem {
-        name: "2 Ship 2 Harkinian",
-        kind: "Декомпиляция",
-        about: "Majora's Mask от авторов Ship of Harkinian",
-        needs: Some("Свой ROM Majora's Mask (США)"),
-        color: [120, 62, 160],
-    },
-    StoreItem {
-        name: "SM64 CoopDX",
-        kind: "Декомпиляция",
-        about: "Super Mario 64 с сетевой игрой до 16 игроков и модами",
-        needs: Some("Свой ROM Super Mario 64 (США)"),
-        color: [200, 50, 50],
-    },
-    StoreItem {
-        name: "OpenGOAL",
-        kind: "Порт PS2",
-        about: "Jak and Daxter: The Precursor Legacy, работающая на ПК без эмулятора",
-        needs: Some("Свой образ диска игры"),
-        color: [214, 140, 40],
-    },
-    StoreItem {
-        name: "SuperTuxKart",
-        kind: "Свободная игра",
-        about: "Картинг с сюжетом, сетевыми гонками и игрой на разделённом экране",
-        needs: None,
-        color: [40, 150, 200],
-    },
-    StoreItem {
-        name: "OpenTTD",
-        kind: "Свободная игра",
-        about: "Транспортная стратегия по мотивам Transport Tycoon Deluxe",
-        needs: None,
-        color: [90, 140, 60],
-    },
-    StoreItem {
-        name: "Mindustry",
-        kind: "Свободная игра",
-        about: "Защита башнями и автоматизация производства",
-        needs: None,
-        color: [190, 120, 60],
-    },
-];
 
 #[cfg(test)]
 mod tests {
