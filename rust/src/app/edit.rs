@@ -284,9 +284,10 @@ impl App {
     /// File dialog for the edited game's background; true when one was set.
     fn pick_background(&mut self) -> bool {
         let Some(id) = self.edit_id.clone() else { return false };
-        let picked = self.dialog("Свой фон (широкий)").add_filter("Картинки", &IMAGES).pick_file();
+        let all: Vec<&str> = IMAGES.iter().chain(super::bg::VIDEO_EXT.iter()).copied().collect();
+        let picked = self.dialog("Свой фон (широкий)").add_filter("Картинки и видео", &all).pick_file();
         let Some(p) = picked else { return false };
-        match Library::import_media(&p) {
+        match super::bg::stored_background(&p) {
             Ok(url) => {
                 self.set_background(&id, &url);
                 true

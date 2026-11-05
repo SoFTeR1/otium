@@ -74,6 +74,7 @@ impl App {
                         item(SetKey::PadTest, "Геймпад: проверка и калибровка", pad),
                         item(SetKey::VpnKino, "VPN для Кинопоиска", self.vpn_setting_value()),
                         item(SetKey::PadApps, "Геймпад в «Медиа»", if s.setting_bool("padApps", true) { "Мышь и кнопки" } else { "Выкл (мышь даёт Steam)" }),
+                        item(SetKey::Backgrounds, "Фоны", if s.setting_str("bgMode") == "global" { "Общий фон" } else { "Арт игры" }),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
                         item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { crate::ambient::level_name(s.setting_str("ambient")) } else { "нет в этой сборке" }),
                         item(SetKey::Splash, "Заставка при запуске", onoff(s.setting_bool("splash", true))),
@@ -135,6 +136,7 @@ impl App {
             SetMenu::Timer => self.timer_items(),
             // built by search_text
             SetMenu::Search | SetMenu::Vpn => return,
+            SetMenu::Backgrounds => self.bg_menu(),
             SetMenu::Power => (
                 "Питание".to_string(),
                 vec![
@@ -184,6 +186,9 @@ impl App {
         if menu == SetMenu::Vpn {
             return self.vpn_choice(key);
         }
+        if menu == SetMenu::Backgrounds {
+            return self.bg_setting(key, focus);
+        }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
             order[(i + 1) % order.len()].to_string()
@@ -200,6 +205,8 @@ impl App {
                 return;
             }
             SetKey::Account => return self.open_settings(SetMenu::Account, 0),
+            SetKey::Backgrounds => return self.open_settings(SetMenu::Backgrounds, 0),
+            SetKey::BgMode | SetKey::BgTrailers | SetKey::BgSlide | SetKey::BgAdd | SetKey::BgRemove => {}
             SetKey::Discord => return self.open_settings(SetMenu::Discord, 0),
             SetKey::Power => return self.open_settings(SetMenu::Power, 0),
             SetKey::Sort => {

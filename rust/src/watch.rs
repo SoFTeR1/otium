@@ -48,6 +48,8 @@ pub enum Event {
     ServiceClosed { id: &'static str, secs: u64 },
     /// a VPN switch finished: what was asked, and the state the tunnel ended up in
     VpnDone { wanted: bool, res: Result<bool, String> },
+    /// a Steam game's trailer is ready in the cache (None: it has none)
+    Trailer { appid: String, path: Option<std::path::PathBuf> },
 }
 
 /// Sends events to the UI and wakes it up.

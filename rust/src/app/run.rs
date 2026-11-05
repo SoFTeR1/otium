@@ -288,6 +288,7 @@ impl App {
             Event::GameWindow { hwnd } => self.game_hwnd = hwnd,
             e @ (Event::ServiceWindow { .. } | Event::ServiceClosed { .. }) => self.on_service_event(e),
             Event::VpnDone { wanted, res } => self.on_vpn_done(wanted, res),
+            Event::Trailer { appid, path } => self.on_trailer(appid, path),
             Event::Show => self.show_window(),
             Event::GuideFront { prev } => {
                 self.show_window();

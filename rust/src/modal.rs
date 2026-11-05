@@ -46,6 +46,7 @@ pub enum SetMenu {
     Edit,
     /// "Кинопоиск не работает через VPN": what to do
     Vpn,
+    Backgrounds,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -58,6 +59,12 @@ pub enum SetKey {
     Layout,
     Sounds,
     PadApps,
+    Backgrounds,
+    BgMode,
+    BgTrailers,
+    BgSlide,
+    BgAdd,
+    BgRemove,
     VpnKino,
     KinoVpnOff,
     KinoVpnKeep,

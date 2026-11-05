@@ -14,6 +14,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+mod bg;
 mod calls;
 mod control;
 mod top;
@@ -50,6 +51,9 @@ struct Toast {
 #[derive(Default, Clone)]
 struct Art {
     covers: Vec<String>,
+    /// the game's wide art
+    heroes: Vec<String>,
+    /// everything that can stand in for a picture of the game: its own background, art, cover
     backgrounds: Vec<String>,
     logos: Vec<String>,
 }
@@ -140,6 +144,7 @@ pub struct App {
     /// the pad as mouse and keys inside the Media service windows
     padmouse: Arc<crate::padmouse::Shared>,
     vpn: vpnui::Vpn,
+    bg: bg::Bg,
 }
 
 impl App {
@@ -232,6 +237,7 @@ impl App {
             tabs: Default::default(),
             padmouse: Default::default(),
             vpn: vpnui::Vpn::new(),
+            bg: Default::default(),
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));
@@ -295,7 +301,7 @@ impl App {
         if i == self.sel || i >= self.games.len() {
             return;
         }
-        self.bg_prev = self.games.get(self.sel).map(|g| self.art(g).backgrounds).unwrap_or_default();
+        self.bg_prev = self.bg_stills(self.games.get(self.sel));
         self.bg_changed = Instant::now();
         self.sel = i;
     }
@@ -628,11 +634,12 @@ fn art_for(g: &Game, root: Option<&std::path::Path>) -> Art {
     let id = g.steam_app_id();
     let steam = |f: fn(Option<&std::path::Path>, &str) -> Vec<String>| id.as_deref().map(|id| f(root, id)).unwrap_or_default();
     a.covers = merge(g.cover.as_deref(), steam(steam::cover_candidates));
-    a.backgrounds.extend(g.custom_background().and_then(image_uri));
-    a.backgrounds.extend(merge(g.hero.as_deref(), steam(steam::hero_candidates)));
+    a.heroes = merge(g.hero.as_deref(), steam(steam::hero_candidates));
+    a.backgrounds.extend(g.custom_background().filter(|c| !crate::video::is_video(c)).and_then(image_uri));
+    a.backgrounds.extend(a.heroes.iter().cloned());
     a.backgrounds.extend(a.covers.iter().cloned());
     a.logos = merge(g.logo.as_deref(), steam(steam::logo_candidates));
-    for list in [&mut a.covers, &mut a.backgrounds, &mut a.logos] {
+    for list in [&mut a.covers, &mut a.heroes, &mut a.backgrounds, &mut a.logos] {
         let mut seen = HashSet::new();
         list.retain(|u| seen.insert(u.to_lowercase()));
     }
@@ -716,6 +723,7 @@ impl eframe::App for App {
         let front = !self.away() && !(own != 0 && crate::win::is_minimized(own));
         self.input.focused = front;
         self.update_ambient(front);
+        self.tick_bg(ctx, front);
         let mut navs = self.input.poll(ctx);
         if front {
             navs.extend(self.mouse(ctx, frame));
@@ -999,7 +1007,7 @@ impl App {
 
     fn paint_background(&self, ui: &egui::Ui, rect: Rect) {
         let p = ui.painter();
-        let cur = self.games.get(self.sel).map(|g| self.art(g).backgrounds).unwrap_or_default();
+        let cur = self.bg_stills(self.games.get(self.sel));
         let t = (self.bg_changed.elapsed().as_secs_f32() / 0.45).min(1.0);
         let dim = Color32::from_gray(150);
         if t < 1.0 && !self.bg_prev.is_empty() {
@@ -1010,6 +1018,7 @@ impl App {
             let a = (e * 150.0) as u8;
             draw::cover(ui, &cur, rect, 0.0, Color32::from_rgba_unmultiplied(a, a, a, (e * 255.0) as u8), (0.5, 0.3));
         }
+        self.paint_bg_video(ui, rect);
         // the pages below the home screen sit on a darker background
         let down = self.pages.pos.min(1.0);
         if down > 0.0 {
