@@ -24,6 +24,8 @@ mod pages;
 mod run;
 pub use calls::PickFor;
 mod settings;
+mod tabs;
+pub(crate) use tabs::Tab;
 mod social;
 pub use pages::fmt_date;
 use run::Launching;
@@ -132,6 +134,8 @@ pub struct App {
     edit_id: Option<String>,
     /// "Переставить": Left / Right move the selected tile
     reorder: bool,
+    /// the Media and Store tabs
+    tabs: tabs::Tabs,
 }
 
 impl App {
@@ -221,6 +225,7 @@ impl App {
             calls: calls::Calls::new(calls_bus),
             edit_id: None,
             reorder: false,
+            tabs: Default::default(),
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));
@@ -292,14 +297,14 @@ impl App {
     }
 
     fn handle(&mut self, nav: Nav, frame: &eframe::Frame) {
-        let before = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some());
+        let before = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some(), self.tab());
         let from_cc = matches!(self.modal, Some(Modal::Control { .. }));
         self.handle_nav(nav, frame);
         self.after_control_center(nav, from_cc);
         if !self.sounds_on() {
             return;
         }
-        let after = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some());
+        let after = (self.sel, self.zone, self.pages.page, self.modal.is_some(), self.launching.is_some(), self.tab());
         let sfx = if self.launching.is_some() && !before.4 {
             Some(crate::sound::Sfx::Launch)
         } else {
@@ -358,6 +363,9 @@ impl App {
         let n = self.games.len();
         if let Zone::Top(i) = self.zone {
             return self.top_nav(i, nav);
+        }
+        if self.tab() != Tab::Games {
+            return self.tab_nav(nav);
         }
         match (self.zone, nav) {
             (Zone::Row, Nav::Up) => self.enter_top(),
@@ -816,10 +824,17 @@ impl App {
         let dt = ui.input(|i| i.stable_dt).min(0.1);
         let appear = ease_out((self.started.elapsed().as_secs_f32() / 0.5).min(1.0));
 
-        self.paint_background(ui, rect);
+        let games_tab = self.tab() == Tab::Games;
+        if games_tab {
+            self.paint_background(ui, rect);
+        } else {
+            self.paint_tab_background(ui, rect);
+        }
         self.paint_top_bar(ui, rect, s, appear);
 
-        if self.games.is_empty() {
+        if !games_tab {
+            self.paint_tab(ui, rect, s, dt, appear);
+        } else if self.games.is_empty() {
             let p = ui.painter();
             p.text(rect.center() - vec2(0.0, 30.0 * s), Align2::CENTER_CENTER, "Библиотека пуста", semibold(40.0 * s), white(appear));
             let add = if self.pad_kind() == PadKind::PlayStation { "□" } else { "X" };
@@ -844,6 +859,7 @@ impl App {
             (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
             (None, 0) if self.reorder => vec![(0, "Готово")],
             (None, 0) if matches!(self.zone, Zone::Top(_)) => vec![(0, "Выбрать"), (1, "Назад")],
+            (None, 0) if !games_tab => self.tab_hints(),
             (None, 0) => vec![(0, "Выбрать"), (3, "Добавить"), (2, "Параметры")],
             (None, _) => vec![(0, "Выбрать"), (1, "Назад")],
         };
@@ -1000,11 +1016,19 @@ impl App {
     fn paint_top_bar(&self, ui: &egui::Ui, rect: Rect, s: f32, a: f32) {
         let p = ui.painter();
         let y = 62.0 * s;
-        let x = 96.0 * s;
-        let games = p.text(pos2(x, y), Align2::LEFT_CENTER, "Игры", semibold(30.0 * s), white(a));
-        // not ready yet: shown locked
-        let media = p.text(pos2(games.right() + 36.0 * s, y), Align2::LEFT_CENTER, "Медиа", semibold(30.0 * s), white(0.35 * a));
-        p.text(pos2(media.right() + 10.0 * s, y + 1.0 * s), Align2::LEFT_CENTER, draw::ic::LOCK, draw::icon(20.0 * s), white(0.35 * a));
+        let items = self.top_items();
+        let focus = match self.zone {
+            Zone::Top(i) if self.modal.is_none() && !self.social.open && self.pages.page == 0 => match items.get(i.min(items.len() - 1)) {
+                Some(top::TopItem::Tab(t)) => Some(*t),
+                _ => None,
+            },
+            _ => None,
+        };
+        for (r, (t, _)) in self.paint_tab_names(ui, s, a, focus).into_iter().zip(tabs::TABS) {
+            if let Some(i) = items.iter().position(|x| *x == top::TopItem::Tab(t)) {
+                crate::mouse::add(r, crate::mouse::Hit::Top(i));
+            }
+        }
 
         let right = rect.right() - 96.0 * s;
         let clock = chrono::Local::now().format("%H:%M").to_string();

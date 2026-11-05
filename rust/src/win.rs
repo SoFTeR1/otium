@@ -524,3 +524,28 @@ pub fn write_shortcut(path: &Path, target: &Path) -> bool {
         file.Save(PCWSTR(p.as_ptr()), true).is_ok()
     }
 }
+
+/// The visible, titled, unowned window of a process (e.g. a browser app window we started).
+pub fn main_window(pid: u32) -> Option<isize> {
+    struct Ctx {
+        pid: u32,
+        found: isize,
+    }
+    unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> BOOL {
+        let ctx = &mut *(l.0 as *mut Ctx);
+        let h = w.0 as isize;
+        if !IsWindowVisible(w).as_bool() || GetWindowTextLengthW(w) == 0 || window_pid(h) != ctx.pid {
+            return true.into();
+        }
+        if GetWindow(w, GW_OWNER).is_ok_and(|o| !o.0.is_null()) {
+            return true.into();
+        }
+        ctx.found = h;
+        false.into()
+    }
+    let mut ctx = Ctx { pid, found: 0 };
+    unsafe {
+        let _ = EnumWindows(Some(cb), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    (ctx.found != 0).then_some(ctx.found)
+}

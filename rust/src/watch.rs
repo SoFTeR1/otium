@@ -43,6 +43,9 @@ pub enum Event {
     Voice(crate::voice::Event),
     /// what's playing changed (None = nothing)
     Music(Option<crate::media::Music>),
+    /// a Media tab service window appeared / its browser exited (after `secs` seconds)
+    ServiceWindow { id: &'static str, hwnd: isize },
+    ServiceClosed { id: &'static str, secs: u64 },
 }
 
 /// Sends events to the UI and wakes it up.

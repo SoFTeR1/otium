@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TopItem {
+    /// Игры / Медиа / Магазин on the left
+    Tab(super::Tab),
     Update,
     Search,
     Settings,
@@ -33,7 +35,7 @@ const BLUE: Color32 = Color32::from_rgb(61, 123, 255);
 
 impl App {
     pub(super) fn top_items(&self) -> Vec<TopItem> {
-        let mut v = Vec::new();
+        let mut v: Vec<TopItem> = super::tabs::TABS.iter().map(|(t, _)| TopItem::Tab(*t)).collect();
         if self.updates.avail.is_some() {
             v.push(TopItem::Update);
         }
@@ -62,6 +64,7 @@ impl App {
 
     fn top_activate(&mut self, t: TopItem) {
         match t {
+            TopItem::Tab(t) => self.set_tab(t),
             TopItem::Update => self.start_update(),
             TopItem::Search => self.keyboard("Поиск игры", "", crate::keyboard::Target::Search, 40, false),
             TopItem::Settings => self.open_settings(SetMenu::Main, 0),
@@ -168,6 +171,7 @@ impl App {
 
     fn show_game(&mut self, i: usize) {
         self.social.open = false;
+        self.set_tab(super::Tab::Games);
         self.go_page(0);
         self.select(i);
         self.zone = Zone::Row;
@@ -300,7 +304,7 @@ impl App {
         }
         // the last one painted is on top
         let Some(hit) = hits.iter().rev().find(|(r, h)| r.contains(pos) && self.hit_active(*h)).map(|(_, h)| *h) else { return navs };
-        if let Hit::Game(_) = hit {
+        if let Hit::Game(_) | Hit::Media(_) = hit {
             // a tile is chosen by clicking (hovering would change the background at every move);
             // a double click starts it
             if click {
@@ -326,7 +330,7 @@ impl App {
             Some(_) => matches!(h, Hit::Row(_)),
             None if self.social.open => matches!(h, Hit::Social(_)),
             None if self.launching.is_some() || self.reorder => false,
-            None => matches!(h, Hit::Game(_) | Hit::Play | Hit::More | Hit::Top(_)) && self.pages.page == 0,
+            None => matches!(h, Hit::Game(_) | Hit::Media(_) | Hit::Play | Hit::More | Hit::Top(_)) && self.pages.page == 0,
         }
     }
 
@@ -336,6 +340,7 @@ impl App {
                 self.select(i);
                 self.zone = Zone::Row;
             }
+            Hit::Media(i) => self.tab_hover(i),
             Hit::Play => self.zone = Zone::Play,
             Hit::More => self.zone = Zone::More,
             Hit::Top(i) => self.zone = Zone::Top(i),

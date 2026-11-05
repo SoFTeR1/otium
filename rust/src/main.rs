@@ -20,6 +20,7 @@ mod sound;
 mod steam;
 mod media;
 mod mixer;
+mod services;
 mod steam_api;
 mod thumbs;
 mod tray;
