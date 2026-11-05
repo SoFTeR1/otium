@@ -210,22 +210,32 @@ impl App {
         self.toast(&format!("Открываем {}…", s.name), false);
         self.tabs.opening = Some((s.id, Instant::now()));
         attach(s, true);
-        let (bus, id, pid) = (self.bus.clone(), s.id, child.id());
+        let (bus, id) = (self.bus.clone(), s.id);
         std::thread::spawn(move || {
             let at = Instant::now();
-            // the browser shows its window within a few seconds; it exits when the window closes
-            let mut shown = false;
-            loop {
-                if let Ok(Some(_)) = child.try_wait() {
-                    break;
+            let dir = services::profile_dir(id);
+            // The window's process isn't always the one started: the browser may restart itself or
+            // hand over to a copy already running. The one listening on the DevTools port is it.
+            let mut found = None;
+            while found.is_none() && at.elapsed() < Duration::from_secs(30) {
+                let started_alive = matches!(child.try_wait(), Ok(None));
+                let by_port = crate::cdp::port(&dir, Duration::from_millis(250)).and_then(crate::win::port_owner);
+                let pid = by_port.or(started_alive.then(|| child.id()));
+                match pid.and_then(|p| crate::win::main_window(p).map(|h| (p, h))) {
+                    Some(x) => found = Some(x),
+                    // nothing started and no port for a while: there is no window to wait for
+                    None if pid.is_none() && at.elapsed() > Duration::from_secs(20) => break,
+                    None => std::thread::sleep(Duration::from_millis(100)),
                 }
-                if !shown && at.elapsed() < Duration::from_secs(30) {
-                    if let Some(h) = crate::win::main_window(pid) {
-                        shown = true;
-                        bus.send(Event::ServiceWindow { id, hwnd: h });
-                    }
+            }
+            if let Some((pid, hwnd)) = found {
+                eprintln!("service {id}: window {hwnd} of process {pid}");
+                services::remember_pid(id, pid);
+                bus.send(Event::ServiceWindow { id, hwnd });
+                // the browser exits when the window closes
+                while crate::win::alive(pid) {
+                    std::thread::sleep(Duration::from_secs(1));
                 }
-                std::thread::sleep(Duration::from_millis(if shown { 1000 } else { 250 }));
             }
             bus.send(Event::ServiceClosed { id, secs: at.elapsed().as_secs() });
         });

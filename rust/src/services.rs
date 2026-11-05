@@ -113,9 +113,16 @@ pub fn launch(s: &Service) -> Result<Child, String> {
     let _ = std::fs::create_dir_all(profile_dir(s.id));
     // a port file left from the last run would point at a port nobody listens on
     let _ = std::fs::remove_file(profile_dir(s.id).join("DevToolsActivePort"));
-    let child = Command::new(&exe).args(args(s)).spawn().map_err(|e| format!("Не удалось открыть {}: {e}", s.name))?;
-    let _ = std::fs::write(profile_dir(s.id).join("otium.pid"), child.id().to_string());
+    // with a compatibility layer in its environment Edge restarts itself at once, and the process
+    // started here is gone while the window lives on in another one
+    let child = Command::new(&exe).args(args(s)).env_remove("__COMPAT_LAYER").spawn().map_err(|e| format!("Не удалось открыть {}: {e}", s.name))?;
+    remember_pid(s.id, child.id());
     Ok(child)
+}
+
+/// The process holding the service's window, for finding it again after OTIUM restarts.
+pub fn remember_pid(id: &str, pid: u32) {
+    let _ = std::fs::write(profile_dir(id).join("otium.pid"), pid.to_string());
 }
 
 /// The browser and window of this service left open from before (OTIUM was restarted meanwhile):

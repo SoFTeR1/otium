@@ -549,3 +549,38 @@ pub fn main_window(pid: u32) -> Option<isize> {
     }
     (ctx.found != 0).then_some(ctx.found)
 }
+
+/// The process listening on a local TCP port (IPv4).
+pub fn port_owner(port: u16) -> Option<u32> {
+    use windows::Win32::NetworkManagement::IpHelper::{GetExtendedTcpTable, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER};
+    use windows::Win32::Networking::WinSock::AF_INET;
+    let mut size = 64 * 1024u32;
+    for _ in 0..3 {
+        // u32s: the table's alignment
+        let mut buf = vec![0u32; size as usize / 4 + 1];
+        let r = unsafe { GetExtendedTcpTable(Some(buf.as_mut_ptr().cast()), &mut size, false, AF_INET.0 as u32, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+        if r == 122 {
+            continue; // ERROR_INSUFFICIENT_BUFFER: `size` is now what it needs
+        }
+        if r != 0 {
+            return None;
+        }
+        let table = buf.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
+        let rows = unsafe { std::slice::from_raw_parts(std::ptr::addr_of!((*table).table).cast::<windows::Win32::NetworkManagement::IpHelper::MIB_TCPROW_OWNER_PID>(), (*table).dwNumEntries as usize) };
+        // ports are stored in network byte order in the low 16 bits
+        return rows.iter().find(|r| u16::from_be(r.dwLocalPort as u16) == port).map(|r| r.dwOwningPid);
+    }
+    None
+}
+
+#[cfg(test)]
+mod port_tests {
+    #[test]
+    fn finds_who_listens() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert_eq!(super::port_owner(port), Some(std::process::id()));
+        drop(l);
+        assert_eq!(super::port_owner(port), None);
+    }
+}
