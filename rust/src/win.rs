@@ -595,3 +595,29 @@ pub fn disk_free(path: &Path) -> Option<u64> {
     unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free), None, None) }.ok()?;
     Some(free)
 }
+
+/// Disks one can install on: root and volume name (no optical or unready drives).
+pub fn drives() -> Vec<(PathBuf, String)> {
+    use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
+    let mask = unsafe { GetLogicalDrives() };
+    let mut out = Vec::new();
+    for i in 0..26u8 {
+        if mask & (1 << i) == 0 {
+            continue;
+        }
+        let root = format!("{}:\\", (b'A' + i) as char);
+        let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
+        // 2 removable, 3 fixed, 4 network
+        if !matches!(unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) }, 2..=4) {
+            continue;
+        }
+        let mut name = [0u16; 128];
+        let ready = unsafe { GetVolumeInformationW(PCWSTR(wide.as_ptr()), Some(&mut name), None, None, None, None) }.is_ok();
+        if !ready {
+            continue;
+        }
+        let end = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+        out.push((PathBuf::from(root), String::from_utf16_lossy(&name[..end])));
+    }
+    out
+}

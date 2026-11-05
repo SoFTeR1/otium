@@ -21,6 +21,40 @@ pub struct Shop {
     checked: bool,
     /// the game the open menu or question is about
     current: Option<String>,
+    /// the folder chooser: where it is (None: the list of disks), and what its rows do
+    folder: Option<PathBuf>,
+    rows: Vec<FolderRow>,
+    /// the folder picked for the install about to start
+    chosen: Option<PathBuf>,
+}
+
+enum FolderRow {
+    Here,
+    New,
+    Up,
+    Go(PathBuf),
+}
+
+/// A long path for a title: its end is what tells where one is.
+fn short_path(p: &str) -> String {
+    const MAX: usize = 44;
+    let n = p.chars().count();
+    if n <= MAX {
+        return p.to_string();
+    }
+    format!("…{}", p.chars().skip(n - MAX).collect::<String>())
+}
+
+#[test]
+fn long_paths_keep_their_end() {
+    assert_eq!(short_path(r"D:\Игры"), r"D:\Игры");
+    let long = format!(r"D:\{}\Игры", "a".repeat(60));
+    let s = short_path(&long);
+    assert!(s.starts_with('…') && s.ends_with("Игры") && s.chars().count() == 45);
+}
+
+fn gigabytes(bytes: u64) -> String {
+    format!("свободно {} ГБ", bytes / (1024 * 1024 * 1024))
 }
 
 impl App {
@@ -50,13 +84,6 @@ impl App {
         }
         let have = self.store_version(&item.id)?;
         self.shop.latest.get(&item.id).filter(|v| **v != have).cloned()
-    }
-
-    fn store_root(&self) -> PathBuf {
-        match self.lib.setting_str("storeDir") {
-            "" => store::default_root(),
-            d => PathBuf::from(d),
-        }
     }
 
     /// The first look at the Store this session: fresh catalog, and versions of what's installed.
@@ -92,11 +119,88 @@ impl App {
             return self.toast("Сначала дождитесь конца текущей установки", false);
         }
         self.shop.current = Some(item.id.clone());
-        let root = self.store_root();
-        let mut text = format!("Скачается с GitHub автора ({}) в папку {}.", item.repo, root.display());
+        // from the last place chosen, if it's still there
+        self.shop.folder = Some(PathBuf::from(self.lib.setting_str("storeDir"))).filter(|d| d.is_dir());
+        self.modal_at = std::time::Instant::now();
+        self.folder_show();
+    }
+
+    /// Fills the chooser with what's at its current place.
+    pub(super) fn folder_show(&mut self) {
+        let row = |label: String, value: String| SetItem { key: SetKey::FolderRow, label, value, danger: false };
+        let (mut rows, mut items) = (Vec::new(), Vec::new());
+        let title = match self.shop.folder.clone() {
+            None => {
+                for (root, name) in crate::win::drives() {
+                    let label = if name.is_empty() { root.display().to_string() } else { format!("{} {name}", root.display()) };
+                    items.push(row(label, crate::win::disk_free(&root).map(gigabytes).unwrap_or_default()));
+                    rows.push(FolderRow::Go(root));
+                }
+                "Куда установить?".to_string()
+            }
+            Some(dir) => {
+                items.push(row("Установить сюда".into(), crate::win::disk_free(&dir).map(gigabytes).unwrap_or_default()));
+                rows.push(FolderRow::Here);
+                items.push(row("Новая папка…".into(), String::new()));
+                rows.push(FolderRow::New);
+                items.push(row("‹ Наверх".into(), String::new()));
+                rows.push(FolderRow::Up);
+                for sub in store::subfolders(&dir) {
+                    items.push(row(sub.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), String::new()));
+                    rows.push(FolderRow::Go(sub));
+                }
+                short_path(&dir.display().to_string())
+            }
+        };
+        self.shop.rows = rows;
+        self.modal = Some(Modal::Settings { menu: SetMenu::Folder, title, items, focus: 0, scroll: 0.0 });
+    }
+
+    pub(super) fn folder_row(&mut self, i: usize) {
+        match self.shop.rows.get(i) {
+            Some(FolderRow::Here) => self.folder_chosen(),
+            Some(FolderRow::New) => self.keyboard("Новая папка", "", crate::keyboard::Target::NewFolder, 60, false),
+            Some(FolderRow::Up) => self.folder_up(),
+            Some(FolderRow::Go(p)) => {
+                self.shop.folder = Some(p.clone());
+                self.folder_show();
+            }
+            None => {}
+        }
+    }
+
+    /// B: one level up; from the list of disks, out.
+    pub(super) fn folder_up(&mut self) {
+        match self.shop.folder.take() {
+            None => self.modal = None,
+            Some(d) => {
+                self.shop.folder = d.parent().map(PathBuf::from);
+                self.folder_show();
+            }
+        }
+    }
+
+    pub(super) fn folder_create(&mut self, name: &str) {
+        let Some(dir) = self.shop.folder.clone() else { return self.folder_show() };
+        if !store::folder_name_ok(name) {
+            self.toast("Такое имя папки Windows не примет", true);
+            return self.folder_show();
+        }
+        let new = dir.join(name.trim());
+        match std::fs::create_dir_all(&new) {
+            Ok(()) => self.shop.folder = Some(new),
+            Err(e) => self.toast(&format!("Не удалось создать папку: {e}"), true),
+        }
+        self.folder_show();
+    }
+
+    fn folder_chosen(&mut self) {
+        let (Some(root), Some(item)) = (self.shop.folder.clone(), self.current_item()) else { return };
+        let mut text = format!("Скачается с GitHub автора ({}) в {}.", item.repo, root.join(&item.id).display());
         if let Some(n) = &item.needs {
             text = format!("Нужно: {n}. OTIUM этого не скачивает: программа попросит указать файлы сама.\n{text}");
         }
+        self.shop.chosen = Some(root);
         self.open(Modal::Confirm { title: format!("Установить {}?", item.name), text, yes: SetKey::StoreInstall, yes_label: "Установить", focus: 1 });
     }
 
@@ -164,7 +268,12 @@ impl App {
         }
         self.shop.busy = Some((item.id.clone(), Stage::Download, 0));
         // an update goes where the game already is
-        let root = self.store_dir(&item.id).and_then(|d| d.parent().map(PathBuf::from)).unwrap_or_else(|| self.store_root());
+        let chosen = self.shop.chosen.take();
+        if let Some(c) = &chosen {
+            self.lib.settings.insert("storeDir".into(), c.to_string_lossy().to_string().into());
+            self.save();
+        }
+        let root = self.store_dir(&item.id).and_then(|d| d.parent().map(PathBuf::from)).or(chosen).unwrap_or_else(store::default_root);
         let (bus, item) = (self.bus.clone(), item.clone());
         std::thread::spawn(move || {
             let b = bus.clone();
@@ -262,14 +371,4 @@ impl App {
         }
     }
 
-    /// Настройки → Папка для игр магазина.
-    pub(super) fn store_dir_value(&self) -> String {
-        self.store_root().display().to_string()
-    }
-
-    pub(super) fn store_pick_dir(&mut self) {
-        let Some(d) = self.dialog("Папка для игр магазина").pick_folder() else { return };
-        self.lib.settings.insert("storeDir".into(), d.to_string_lossy().to_string().into());
-        self.save();
-    }
 }

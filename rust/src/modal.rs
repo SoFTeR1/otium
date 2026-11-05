@@ -49,6 +49,8 @@ pub enum SetMenu {
     Backgrounds,
     /// an installed Store game
     Store,
+    /// choosing where a Store game goes
+    Folder,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -61,7 +63,7 @@ pub enum SetKey {
     Layout,
     Sounds,
     PadApps,
-    StoreDir,
+    FolderRow,
     StoreInstall,
     StorePlay,
     StoreUpdate,

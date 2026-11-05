@@ -332,6 +332,27 @@ fn overlay(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The folders inside `dir` to offer for installing, by name (hidden and system ones aren't).
+pub fn subfolders(dir: &Path) -> Vec<PathBuf> {
+    use std::os::windows::fs::MetadataExt;
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = rd
+        .flatten()
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_dir() && m.file_attributes() & 0x6 == 0))
+        .map(|e| e.path())
+        .collect();
+    out.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    out
+}
+
+/// Whether Windows takes this as a folder name.
+pub fn folder_name_ok(name: &str) -> bool {
+    let n = name.trim();
+    let base = n.split('.').next().unwrap_or(n).to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (base.len() == 4 && (base.starts_with("COM") || base.starts_with("LPT")) && base.ends_with(|c: char| c.is_ascii_digit()));
+    !n.is_empty() && !reserved && !n.ends_with('.') && !n.chars().any(|c| c.is_control() || r#"\/:*?"<>|"#.contains(c))
+}
+
 /// Deletes an installed game's folder, only if OTIUM's mark for this very game is in it.
 pub fn remove(id: &str, dir: &Path) -> Result<(), String> {
     let mark = std::fs::read_to_string(dir.join(MARKER)).unwrap_or_default();
@@ -409,6 +430,28 @@ mod tests {
         assert_eq!(sum_for(&list, "a.zip"), Some(h));
         assert_eq!(sum_for(&list, "b.zip"), Some("f".repeat(64)));
         assert_eq!(sum_for(&list, "c.zip"), None);
+    }
+
+    #[test]
+    fn folder_names() {
+        for good in ["Игры", "My Games 2", "a.b", "COM"] {
+            assert!(folder_name_ok(good), "{good}");
+        }
+        for bad in ["", "  ", "a/b", r"a\b", "..", "x.", "a:b", "CON", "nul.txt", "COM1", "lpt9", "a?"] {
+            assert!(!folder_name_ok(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn folders_on_offer() {
+        let d = tmp("sub");
+        std::fs::create_dir_all(d.join("b")).unwrap();
+        std::fs::create_dir_all(d.join("A")).unwrap();
+        std::fs::write(d.join("file.txt"), "x").unwrap();
+        let names: Vec<_> = subfolders(&d).iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert_eq!(names, ["A", "b"]);
+        assert!(subfolders(&d.join("missing")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

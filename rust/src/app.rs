@@ -360,6 +360,10 @@ impl App {
         if matches!(self.modal, Some(Modal::Friend { .. })) {
             return self.friend_profile_nav(nav);
         }
+        // B in the folder chooser goes one level up
+        if nav == Nav::Back && matches!(self.modal, Some(Modal::Settings { menu: crate::modal::SetMenu::Folder, .. })) {
+            return self.folder_up();
+        }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
             self.apply(action, frame);
