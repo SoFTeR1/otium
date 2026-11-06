@@ -774,7 +774,7 @@ pub fn mics() -> Vec<String> {
 }
 
 /// Linear resampler, good enough for voice.
-struct Resampler {
+pub(crate) struct Resampler {
     step: f64,
     pos: f64,
     last: f32,
@@ -782,12 +782,12 @@ struct Resampler {
 }
 
 impl Resampler {
-    fn new(from: u32, to: u32) -> Self {
+    pub(crate) fn new(from: u32, to: u32) -> Self {
         Self { step: from as f64 / to as f64, pos: 0.0, last: 0.0, primed: false }
     }
 
     /// The stream seen as [last sample of the previous call, input...]; `pos` indexes into it.
-    fn push(&mut self, input: &[f32], out: &mut Vec<f32>) {
+    pub(crate) fn push(&mut self, input: &[f32], out: &mut Vec<f32>) {
         if (self.step - 1.0).abs() < 1e-9 {
             out.extend_from_slice(input);
             return;

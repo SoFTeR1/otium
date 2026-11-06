@@ -22,6 +22,7 @@ mod tvui;
 mod profile;
 pub use control::MixerPanel;
 mod edit;
+mod gallery;
 mod pages;
 mod run;
 pub use calls::PickFor;
@@ -147,6 +148,8 @@ pub struct App {
     vpn: vpnui::Vpn,
     bg: bg::Bg,
     tv: tvui::Tv,
+    /// clips and screenshots
+    gallery: gallery::Gallery,
 }
 
 impl App {
@@ -176,6 +179,7 @@ impl App {
         let tray = crate::tray::Tray::new(own.clone(), bus.clone());
         let social_bus = bus.clone();
         let calls_bus = bus.clone();
+        let gallery = gallery::Gallery::new(own.clone(), bus.clone());
         {
             let bus = bus.clone();
             crate::media::start(cc.egui_ctx.clone(), media_rx, idle.clone(), move |m| bus.send(crate::watch::Event::Music(m)));
@@ -241,12 +245,16 @@ impl App {
             vpn: vpnui::Vpn::new(),
             bg: Default::default(),
             tv: Default::default(),
+            gallery,
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));
         app.padmouse.on.store(app.lib.setting_bool("padApps", true), Ordering::Relaxed);
         app.padmouse.set_cal(&crate::input::parse_cal(app.lib.settings.get("padCal")));
         crate::padmouse::start(app.padmouse.clone());
+        let dir = app.lib.setting_str("clipsDir").to_string();
+        crate::clips::set_folder((!dir.is_empty()).then(|| PathBuf::from(dir)));
+        app.gallery_scan();
         app.social_start();
         // the splash chord, except at sign-in (Windows is still starting, sound would be a surprise)
         let gain = crate::sound::splash_gain(app.volume_percent(SetKey::SplashSound));
@@ -360,6 +368,10 @@ impl App {
         if matches!(self.modal, Some(Modal::Friend { .. })) {
             return self.friend_profile_nav(nav);
         }
+        // B in the folder chooser goes one level up
+        if nav == Nav::Back && matches!(self.modal, Some(Modal::Settings { menu: crate::modal::SetMenu::Folder, .. })) {
+            return self.folder_up();
+        }
         // left and right change a volume row in place
         if matches!(nav, Nav::Left | Nav::Right) && self.volume_nav(nav) {
             return;
@@ -372,6 +384,9 @@ impl App {
         // the call card answers A / B / Y before anything else
         if self.modal.is_none() && self.calls.card_open() && self.call_nav(nav) {
             return;
+        }
+        if self.gallery.open {
+            return self.gallery_nav(nav);
         }
         if self.social.open {
             return self.social_nav(nav);
@@ -574,7 +589,8 @@ impl App {
             || self.calls.call.state != crate::app::calls::CallState::Idle
             || self.calls.room.is_some()
             || self.calls.ring.is_some()
-            || self.pages.music.as_ref().is_some_and(|m| m.playing);
+            || self.pages.music.as_ref().is_some_and(|m| m.playing)
+            || self.gallery.playing();
         crate::ambient::set(front && !busy, self.volume_percent(SetKey::Ambient) as f32 / 100.0);
     }
 
@@ -693,6 +709,7 @@ impl eframe::App for App {
         self.tick(ctx);
         self.tick_timer();
         self.tick_tv();
+        self.tick_gallery(ctx);
         self.tick_updates();
         if self.forget_at.elapsed() > Duration::from_secs(5) && std::env::var("OTIUM_MEM_EXP").ok().as_deref() != Some("tour-keep") {
             self.forget_at = Instant::now();
@@ -880,6 +897,7 @@ impl App {
         let hints: Vec<(usize, &str)> = match (&self.modal, self.pages.page) {
             (Some(m), _) => m.hints(),
             (None, _) if self.calls.card_open() => vec![],
+            (None, _) if self.gallery.open => self.gallery_hints(),
             (None, _) if self.social.open => vec![(0, "Выбрать"), (2, "Меню друга"), (1, "Назад")],
             (None, 0) if self.reorder => vec![(0, "Готово")],
             (None, 0) if matches!(self.zone, Zone::Top(_)) => vec![(0, "Выбрать"), (1, "Назад")],
@@ -890,12 +908,15 @@ impl App {
         if self.social.open {
             self.paint_social(ui, rect, s);
         }
+        if self.gallery.open {
+            self.paint_gallery(ui, rect, s, dt);
+        }
         self.paint_call_pill(ui, rect, s);
         if self.calls.card_open() {
             self.paint_call_card(ui, rect, s);
         }
         self.paint_hints(ui, rect, s, &hints);
-        if self.modal.is_none() && !self.social.open && self.pages.page == 0 && self.splash_start.is_none() {
+        if self.modal.is_none() && !self.social.open && !self.gallery.open && self.pages.page == 0 && self.splash_start.is_none() {
             self.paint_build_label(ui, rect, s);
         }
 

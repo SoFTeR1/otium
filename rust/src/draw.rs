@@ -202,6 +202,8 @@ pub mod ic {
     pub const DOWNLOAD: &str = "\u{E896}";
     pub const SHIELD: &str = "\u{EA18}";
     pub const TV: &str = "\u{E7F4}";
+    pub const VIDEO: &str = "\u{E714}";
+    pub const CAMERA: &str = "\u{E722}";
 }
 
 pub fn white(a: f32) -> Color32 {

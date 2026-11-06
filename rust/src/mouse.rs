@@ -23,6 +23,8 @@ pub enum Hit {
     Media(usize),
     /// an entry of the friends list
     Social(usize),
+    /// a tile of the gallery
+    Gallery(usize),
 }
 
 thread_local! {

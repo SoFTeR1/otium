@@ -25,6 +25,10 @@ struct Shared {
     failed: AtomicBool,
     /// share of the height taken by the black bar at the top and at the bottom, in thousandths
     bars: AtomicU32,
+    max_width: AtomicU32,
+    /// played once and stays on its last frame (a clip being watched), instead of looping
+    once: AtomicBool,
+    ended: AtomicBool,
 }
 
 pub struct Player {
@@ -35,11 +39,27 @@ pub struct Player {
 impl Player {
     /// `wake` is called for every new frame.
     pub fn start(path: &Path, wake: impl Fn() + Send + 'static) -> Self {
+        Self::spawn(path, MAX_WIDTH, false, wake)
+    }
+
+    /// A clip being watched: full size, once through.
+    pub fn start_once(path: &Path, wake: impl Fn() + Send + 'static) -> Self {
+        Self::spawn(path, 1920, true, wake)
+    }
+
+    fn spawn(path: &Path, max_width: u32, once: bool, wake: impl Fn() + Send + 'static) -> Self {
         let shared = Arc::new(Shared::default());
         shared.playing.store(true, Ordering::Relaxed);
+        shared.max_width.store(max_width, Ordering::Relaxed);
+        shared.once.store(once, Ordering::Relaxed);
         let (s, p) = (shared.clone(), path.to_path_buf());
         let _ = std::thread::Builder::new().name("video".into()).spawn(move || run(&p, &s, wake));
         Self { shared, path: path.to_path_buf() }
+    }
+
+    /// Played to the end (only a clip being watched gets there).
+    pub fn ended(&self) -> bool {
+        self.shared.ended.load(Ordering::Relaxed)
     }
 
     pub fn path(&self) -> &Path {
@@ -81,8 +101,11 @@ fn run(path: &Path, s: &Shared, wake: impl Fn()) {
             return;
         }
     }
-    if let Ok(b) = unsafe { scan_bars(path) } {
-        s.bars.store((b * 1000.0) as u32, Ordering::Relaxed);
+    let once = s.once.load(Ordering::Relaxed);
+    if !once {
+        if let Ok(b) = unsafe { scan_bars(path) } {
+            s.bars.store((b * 1000.0) as u32, Ordering::Relaxed);
+        }
     }
     // played through at least once, so a failure on reopening doesn't count as "can't be played"
     let mut played = false;
@@ -96,13 +119,18 @@ fn run(path: &Path, s: &Shared, wake: impl Fn()) {
                 break;
             }
         }
+        if once {
+            s.ended.store(true, Ordering::Relaxed);
+            wake();
+            break;
+        }
     }
     unsafe {
         let _ = MFShutdown();
     }
 }
 
-unsafe fn open(path: &Path) -> windows::core::Result<IMFSourceReader> {
+unsafe fn open(path: &Path, max_width: u32) -> windows::core::Result<IMFSourceReader> {
     let mut attrs = None;
     MFCreateAttributes(&mut attrs, 1)?;
     let attrs: IMFAttributes = attrs.ok_or(windows::core::Error::empty())?;
@@ -125,10 +153,10 @@ unsafe fn open(path: &Path) -> windows::core::Result<IMFSourceReader> {
     };
     let native = reader.GetNativeMediaType(FIRST_VIDEO, 0)?.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
     let (w, h) = ((native >> 32) as u32, native as u32);
-    let scaled = (w > MAX_WIDTH && h > 0).then(|| {
+    let scaled = (w > max_width && h > 0).then(|| {
         // even sizes: what scalers expect
-        let nh = (h as u64 * MAX_WIDTH as u64 / w as u64) as u32 & !1;
-        ((MAX_WIDTH as u64) << 32) | nh as u64
+        let nh = (h as u64 * max_width as u64 / w as u64) as u32 & !1;
+        ((max_width as u64) << 32) | nh as u64
     });
     let t = want(&MFVideoFormat_RGB32, scaled)?;
     if reader.SetCurrentMediaType(FIRST_VIDEO, None, &t).is_err() {
@@ -139,7 +167,7 @@ unsafe fn open(path: &Path) -> windows::core::Result<IMFSourceReader> {
 
 /// One pass through the file. Returns how many frames it had.
 unsafe fn play_once(path: &Path, s: &Shared, wake: &impl Fn()) -> windows::core::Result<u32> {
-    let reader = open(path)?;
+    let reader = open(path, s.max_width.load(Ordering::Relaxed))?;
     let cur = reader.GetCurrentMediaType(FIRST_VIDEO)?;
     let sz = cur.GetUINT64(&MF_MT_FRAME_SIZE)?;
     let (w, h) = ((sz >> 32) as u32, sz as u32);
@@ -196,7 +224,7 @@ unsafe fn play_once(path: &Path, s: &Shared, wake: &impl Fn()) -> windows::core:
 /// than playback, so this takes a fraction of a second.
 unsafe fn scan_bars(path: &Path) -> windows::core::Result<f32> {
     const SECONDS: i64 = 12;
-    let reader = open(path)?;
+    let reader = open(path, MAX_WIDTH)?;
     let cur = reader.GetCurrentMediaType(FIRST_VIDEO)?;
     let sz = cur.GetUINT64(&MF_MT_FRAME_SIZE)?;
     let (w, h) = ((sz >> 32) as u32, sz as u32);
@@ -266,6 +294,145 @@ fn bgrx_to_image(data: &[u8], w: usize, h: usize, stride: i32) -> ColorImage {
         }
     }
     ColorImage { size: [w, h], pixels }
+}
+
+/// A clip's still: a picture from its middle, as a JPEG at most `width` wide. Works on what friends
+/// sent too, so it only trusts what Windows reads from the file.
+pub fn poster(path: &Path, out: &Path, width: u32) -> bool {
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+        if MFStartup(MF_VERSION, MFSTARTUP_LITE).is_err() {
+            return false;
+        }
+        let img = middle_frame(path);
+        let _ = MFShutdown();
+        let Ok(img) = img else { return false };
+        let rgb: Vec<u8> = img.pixels.iter().flat_map(|c| [c.r(), c.g(), c.b()]).collect();
+        let Some(buf) = image::RgbImage::from_raw(img.size[0] as u32, img.size[1] as u32, rgb) else { return false };
+        let small = image::DynamicImage::ImageRgb8(buf).thumbnail(width, width);
+        if let Some(dir) = out.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        // written aside and renamed, so a half-written file is never painted (and cached as broken)
+        let tmp = out.with_extension("tmp.jpg");
+        small.save_with_format(&tmp, image::ImageFormat::Jpeg).is_ok() && std::fs::rename(&tmp, out).is_ok()
+    }
+}
+
+/// How long a file plays, in 100 ns units (0 if it doesn't say).
+unsafe fn duration_of(reader: &IMFSourceReader) -> i64 {
+    const MEDIA_SOURCE: u32 = 0xFFFF_FFFF; // MF_SOURCE_READER_MEDIASOURCE
+    reader.GetPresentationAttribute(MEDIA_SOURCE, &MF_PD_DURATION).ok().and_then(|v| i64::try_from(&v).ok().or_else(|| u64::try_from(&v).ok().map(|x| x as i64))).unwrap_or(0)
+}
+
+unsafe fn middle_frame(path: &Path) -> windows::core::Result<ColorImage> {
+    let reader = open(path, MAX_WIDTH)?;
+    let middle = duration_of(&reader) / 2;
+    if middle > 0 {
+        // lands on the key frame before it; what follows is read up to the middle
+        let _ = reader.SetCurrentPosition(&GUID::zeroed(), &windows::core::PROPVARIANT::from(middle));
+    }
+    let cur = reader.GetCurrentMediaType(FIRST_VIDEO)?;
+    let sz = cur.GetUINT64(&MF_MT_FRAME_SIZE)?;
+    let (w, h) = ((sz >> 32) as u32, sz as u32);
+    let stride = cur.GetUINT32(&MF_MT_DEFAULT_STRIDE).map_or((w * 4) as i32, |v| v as i32);
+    let mut last = None;
+    loop {
+        let (mut flags, mut ts, mut sample) = (0u32, 0i64, None);
+        reader.ReadSample(FIRST_VIDEO, 0, None, Some(&mut flags), Some(&mut ts), Some(&mut sample))?;
+        if let Some(s) = sample {
+            if ts >= middle {
+                return to_image(&s, w, h, stride);
+            }
+            last = Some(s);
+        }
+        if flags & END_OF_STREAM != 0 {
+            return match last {
+                Some(s) => to_image(&s, w, h, stride),
+                None => Err(windows::core::Error::empty()),
+            };
+        }
+    }
+}
+
+/// A file's sound, decoded by Windows: stereo 16-bit at 48 kHz (empty if it has none).
+pub fn sound_of(path: &Path) -> Vec<i16> {
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+        if MFStartup(MF_VERSION, MFSTARTUP_LITE).is_err() {
+            return Vec::new();
+        }
+        let out = read_sound(path).unwrap_or_default();
+        let _ = MFShutdown();
+        out
+    }
+}
+
+unsafe fn read_sound(path: &Path) -> windows::core::Result<Vec<i16>> {
+    const FIRST_AUDIO: u32 = 0xFFFF_FFFD;
+    let url: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+    let reader = MFCreateSourceReaderFromURL(PCWSTR(url.as_ptr()), None)?;
+    reader.SetStreamSelection(ALL_STREAMS, false)?;
+    reader.SetStreamSelection(FIRST_AUDIO, true)?;
+    let t = MFCreateMediaType()?;
+    t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;
+    t.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM)?;
+    t.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16)?;
+    t.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, 48_000)?;
+    t.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, 2)?;
+    t.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 4)?;
+    t.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192_000)?;
+    reader.SetCurrentMediaType(FIRST_AUDIO, None, &t)?;
+    let mut out = Vec::new();
+    loop {
+        let (mut flags, mut sample) = (0u32, None);
+        reader.ReadSample(FIRST_AUDIO, 0, None, Some(&mut flags), None, Some(&mut sample))?;
+        if let Some(s) = sample {
+            let buf = s.ConvertToContiguousBuffer()?;
+            let (mut p, mut len) = (std::ptr::null_mut(), 0u32);
+            buf.Lock(&mut p, None, Some(&mut len))?;
+            out.extend(std::slice::from_raw_parts(p, len as usize).chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])));
+            let _ = buf.Unlock();
+        }
+        if flags & END_OF_STREAM != 0 {
+            return Ok(out);
+        }
+    }
+}
+
+/// What a test wants to know about a file.
+#[cfg(test)]
+#[derive(Debug)]
+pub struct Probe {
+    pub frames: u32,
+    pub width: u32,
+    pub height: u32,
+    pub seconds: f64,
+    pub audio_samples: usize,
+}
+
+#[cfg(test)]
+pub fn probe(path: &Path) -> windows::core::Result<Probe> {
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+        MFStartup(MF_VERSION, MFSTARTUP_LITE)?;
+        let reader = open(path, 4096)?;
+        let cur = reader.GetCurrentMediaType(FIRST_VIDEO)?;
+        let sz = cur.GetUINT64(&MF_MT_FRAME_SIZE)?;
+        let seconds = duration_of(&reader) as f64 / 1e7;
+        let mut frames = 0;
+        loop {
+            let (mut flags, mut sample) = (0u32, None);
+            reader.ReadSample(FIRST_VIDEO, 0, None, Some(&mut flags), None, Some(&mut sample))?;
+            frames += sample.is_some() as u32;
+            if flags & END_OF_STREAM != 0 {
+                break;
+            }
+        }
+        let audio_samples = read_sound(path)?.len() / 2;
+        let _ = MFShutdown();
+        Ok(Probe { frames, width: (sz >> 32) as u32, height: sz as u32, seconds, audio_samples })
+    }
 }
 
 /// What a file's name says it is.

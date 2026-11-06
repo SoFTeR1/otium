@@ -39,6 +39,8 @@ pub enum CtlAction {
     Power,
     Vpn,
     Tv,
+    SaveClip,
+    Screenshot,
 }
 
 enum Pic {
@@ -299,6 +301,10 @@ impl App {
         }
 
         t.push(tile(CtlAction::Home, ic::HOME, "Главная", "Главный экран"));
+        if self.gallery.rec.wanted() {
+            t.push(tile(CtlAction::SaveClip, ic::VIDEO, "Клип", "Сохранить последние 30 секунд"));
+        }
+        t.push(tile(CtlAction::Screenshot, ic::CAMERA, "Скриншот", if self.gallery.rec.wanted() { "Снимок игры" } else { "Снимок экрана" }));
 
         if let Some(m) = &self.pages.music {
             let pic = m.art.clone().map(|a| Pic::Uris(vec![a])).unwrap_or(Pic::Glyph(ic::MUSIC));
@@ -462,6 +468,8 @@ impl App {
             }
             CtlAction::Power => self.open_settings(SetMenu::Power, 0),
             CtlAction::Tv => self.tv_toggle(),
+            CtlAction::SaveClip => self.clip_save(),
+            CtlAction::Screenshot => self.clip_shot(),
             CtlAction::Vpn => {
                 // a switch from here never opens a service that was waiting for an answer
                 self.vpn_cancel_pending();

@@ -173,7 +173,7 @@ impl App {
                 self.bg.tex = None;
             }
         }
-        let on_home = self.tab() == Tab::Games && self.pages.page == 0;
+        let on_home = self.tab() == Tab::Games && self.pages.page == 0 && !self.gallery.open;
         let free = on_home && self.splash_start.is_none() && self.launching.is_none();
         let selected = self.games.get(self.sel).cloned();
         self.tick_slides(selected.as_ref());

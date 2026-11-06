@@ -3,6 +3,7 @@
 mod account;
 mod ambient;
 mod app;
+mod clips;
 mod data;
 mod discord;
 mod draw;
@@ -26,6 +27,7 @@ mod services;
 mod steam_api;
 mod thumbs;
 mod trailer;
+mod transfer;
 mod tray;
 mod tv;
 mod update;

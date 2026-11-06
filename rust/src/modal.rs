@@ -47,6 +47,10 @@ pub enum SetMenu {
     /// "Кинопоиск не работает через VPN": what to do
     Vpn,
     Backgrounds,
+    /// a clip or screenshot of the gallery
+    Clip,
+    /// choosing where clips and screenshots go
+    Folder,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -130,6 +134,13 @@ pub enum SetKey {
     EditBackground,
     EditBackgroundReset,
     PadTest,
+    ClipMode,
+    ClipFolder,
+    ClipSend,
+    ClipShow,
+    ClipDelete,
+    FolderRow,
+    FriendClip,
 }
 
 #[derive(Clone, Debug)]

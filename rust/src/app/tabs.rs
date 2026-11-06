@@ -85,21 +85,35 @@ impl App {
     fn tab_entries(&self) -> Vec<Entry> {
         match self.tabs.tab {
             Tab::Games => Vec::new(),
-            Tab::Media => SERVICES
-                .iter()
-                .map(|s| Entry {
-                    name: s.name.into(),
-                    kicker: "Приложение".into(),
-                    about: s.about.into(),
-                    note: self.service_open(s.id).then(|| "● Открыто".to_string()),
-                    color: rgb(s.color),
-                })
-                .collect(),
+            Tab::Media => {
+                let n = self.gallery.count();
+                let clips = Entry {
+                    name: "Клипы и скриншоты".into(),
+                    kicker: "Галерея".into(),
+                    about: "Последние 30 секунд игры — View + RB или Ctrl+Alt+C. Скриншот — L3 + R3 или Ctrl+Alt+S. Смотрите их здесь и отправляйте друзьям.".into(),
+                    note: (n > 0).then(|| format!("Файлов: {n}")),
+                    color: rgb([61, 123, 255]),
+                };
+                std::iter::once(clips)
+                    .chain(SERVICES.iter().map(|s| Entry {
+                        name: s.name.into(),
+                        kicker: "Приложение".into(),
+                        about: s.about.into(),
+                        note: self.service_open(s.id).then(|| "● Открыто".to_string()),
+                        color: rgb(s.color),
+                    }))
+                    .collect()
+            }
         }
     }
 
     fn tab_color(&self) -> Option<Color32> {
         self.tab_entries().get(self.tab_sel()).map(|e| e.color)
+    }
+
+    /// This window is a Media service's, not a game's.
+    pub(super) fn service_window(&self, hwnd: isize) -> bool {
+        self.tabs.windows.iter().any(|(_, h)| *h == hwnd)
     }
 
     fn service_open(&self, id: &str) -> bool {
@@ -139,7 +153,11 @@ impl App {
 
     fn tab_activate(&mut self) {
         match self.tabs.tab {
-            Tab::Media => self.open_service(self.tabs.media_sel),
+            // the gallery's tile comes first, then the services
+            Tab::Media => match self.tabs.media_sel.checked_sub(1) {
+                None => self.open_gallery(),
+                Some(i) => self.open_service(i),
+            },
             Tab::Games => {}
         }
     }
@@ -334,7 +352,7 @@ impl App {
         }
         p.rect_filled(btn, CornerRadius::same((34.0 * s) as u8), if focus { Color32::WHITE } else { white(0.88) });
         let label: &str = match self.tabs.tab {
-            _ if self.tabs.opening.is_some_and(|(id, t)| SERVICES.get(sel).is_some_and(|s| s.id == id) && t.elapsed() < Duration::from_secs(10)) => "Открываем…",
+            _ if self.tabs.opening.is_some_and(|(id, t)| sel.checked_sub(1).and_then(|i| SERVICES.get(i)).is_some_and(|s| s.id == id) && t.elapsed() < Duration::from_secs(10)) => "Открываем…",
             _ => "Открыть",
         };
         p.text(btn.center(), Align2::CENTER_CENTER, label, semibold(26.0 * s), Color32::from_rgb(10, 12, 18));

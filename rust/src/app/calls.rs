@@ -79,6 +79,7 @@ pub enum PickFor {
     NewGroup,
     Invite(String),
     AddToCall,
+    SendClip(std::path::PathBuf),
 }
 
 pub struct Calls {
@@ -1044,6 +1045,7 @@ impl App {
             return self.toast("Выберите хотя бы одного друга", true);
         }
         match purpose {
+            PickFor::SendClip(path) => self.clip_send(&path, &pks),
             PickFor::NewGroup => {
                 self.calls.pending_group = pks;
                 self.open(Modal::Keyboard(Box::new(crate::keyboard::Keyboard::new("Название группы (можно пусто)", "", crate::keyboard::Target::GroupName, 32, false))));

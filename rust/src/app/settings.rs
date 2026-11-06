@@ -78,6 +78,8 @@ impl App {
                         item(SetKey::VpnKino, "VPN для Кинопоиска", self.vpn_setting_value()),
                         item(SetKey::PadApps, "Геймпад в «Медиа»", if s.setting_bool("padApps", true) { "Мышь и кнопки" } else { "Выкл (мышь даёт Steam)" }),
                         item(SetKey::TvDisplay, "Телевизор", self.tv_setting_value()),
+                        item(SetKey::ClipMode, "Запись клипов", self.clip_mode_label()),
+                        item(SetKey::ClipFolder, "Папка клипов и скриншотов", self.folder_value()),
                         item(SetKey::Backgrounds, "Фоны", if s.setting_str("bgMode") == "global" { "Общий фон" } else { "Арт игры" }),
                         item(SetKey::Sounds, "Звуки интерфейса", onoff(self.sounds_on())),
                         item(SetKey::Ambient, "Фоновая музыка", if crate::ambient::available() { self.volume_text(SetKey::Ambient) } else { "нет в этой сборке".to_string() }),
@@ -139,7 +141,7 @@ impl App {
             SetMenu::Edit => return self.open_editor(focus),
             SetMenu::Timer => self.timer_items(),
             // built by search_text
-            SetMenu::Search | SetMenu::Vpn => return,
+            SetMenu::Search | SetMenu::Vpn | SetMenu::Clip | SetMenu::Folder => return,
             SetMenu::Backgrounds => self.bg_menu(),
             SetMenu::Power => (
                 "Питание".to_string(),
@@ -245,6 +247,12 @@ impl App {
         if menu == SetMenu::Backgrounds {
             return self.bg_setting(key, focus);
         }
+        if menu == SetMenu::Clip {
+            return self.clip_setting(key);
+        }
+        if menu == SetMenu::Folder {
+            return self.folder_row(focus);
+        }
         let cycle = |cur: &str, order: &[&str]| -> String {
             let i = order.iter().position(|x| *x == cur).unwrap_or(0);
             order[(i + 1) % order.len()].to_string()
@@ -261,6 +269,9 @@ impl App {
                 return;
             }
             SetKey::Account => return self.open_settings(SetMenu::Account, 0),
+            SetKey::ClipMode => self.clip_mode_next(),
+            SetKey::ClipFolder => return self.folder_open(),
+            SetKey::ClipSend | SetKey::ClipShow | SetKey::ClipDelete | SetKey::FolderRow | SetKey::FriendClip => {}
             SetKey::Backgrounds => return self.open_settings(SetMenu::Backgrounds, 0),
             SetKey::BgMode | SetKey::BgTrailers | SetKey::BgSlide | SetKey::BgAdd | SetKey::BgRemove => {}
             SetKey::Discord => return self.open_settings(SetMenu::Discord, 0),
@@ -445,6 +456,9 @@ impl App {
         if key == SetKey::TvKeep {
             return self.tv_keep();
         }
+        if key == SetKey::ClipDelete {
+            return self.clip_delete_confirmed();
+        }
         use std::os::windows::process::CommandExt;
         let arg = match key {
             SetKey::Restart => "/r",
@@ -465,6 +479,9 @@ impl App {
                 self.modal = None;
                 return;
             }
+            if self.last_text_target == Some(Target::NewFolder) {
+                return self.folder_show();
+            }
             if let Some(t @ (Target::GameName | Target::GamePath | Target::GameArgs)) = self.last_text_target {
                 return self.edit_text_cancelled(t);
             }
@@ -479,6 +496,9 @@ impl App {
         }
         if target == Target::Timer {
             return self.timer_text(&text);
+        }
+        if target == Target::NewFolder {
+            return self.folder_create(&text);
         }
         if target == Target::Search {
             return self.search_text(&text);

@@ -373,13 +373,22 @@ impl App {
                     self.add_friend(&other, &name, false);
                 }
                 ("rm", false) if a.is_friend(&other) => self.remove_friend(&other, false),
+                ("clip", _) => return self.on_clip_offer(id, other, mine, &c, at),
+                ("clipreq", false) if a.is_friend(&other) => self.on_clip_request(&other, &c, at),
+                ("clipans", false) if a.is_friend(&other) => self.on_clip_answer(&other, &c, at),
                 (t, false) if super::calls::CALL_CTRL.contains(&t) => self.on_call_ctrl(&other, &c, at),
                 (t, false) if super::calls::GROUP_CTRL.contains(&t) => self.on_group_ctrl(&other, &c, at),
                 _ => {}
             }
             return;
         }
+        self.chat_line(id, other, mine, text, at);
+    }
 
+    /// A line in the chat with a friend: saved, and announced if nobody is looking at it.
+    pub(super) fn chat_line(&mut self, id: String, other: String, mine: bool, text: String, at: i64) {
+        let Some(a) = self.account() else { return };
+        let recent = |mins: i64| now_ms() - at < mins * 60_000;
         if !a.is_friend(&other) {
             return;
         }
@@ -610,6 +619,7 @@ impl App {
             SetItem { key: SetKey::FriendProfile, label: "Профиль".into(), value: "игры и трофеи".into(), danger: false },
             SetItem { key: SetKey::FriendChat, label: "Написать".into(), value: String::new(), danger: false },
             SetItem { key: SetKey::FriendCall, label: "Позвонить".into(), value: "голосовой звонок".into(), danger: false },
+            SetItem { key: SetKey::FriendClip, label: "Отправить клип".into(), value: "или скриншот".into(), danger: false },
             SetItem { key: SetKey::FriendRemove, label: "Удалить из друзей".into(), value: String::new(), danger: true },
         ];
         self.open(Modal::Settings { menu: SetMenu::Friend, title: self.display_name(a, pk), items, focus: 0, scroll: 0.0 });
@@ -655,6 +665,12 @@ impl App {
                 self.modal = None;
                 if let Some(pk) = self.social.menu_pk.take() {
                     self.start_call(&pk);
+                }
+            }
+            SetKey::FriendClip => {
+                self.modal = None;
+                if let Some(pk) = self.social.menu_pk.take() {
+                    self.gallery_for_friend(&pk);
                 }
             }
             SetKey::FriendRemove => {

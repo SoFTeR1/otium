@@ -52,6 +52,11 @@ pub enum Event {
     Trailer { appid: String, path: Option<std::path::PathBuf> },
     /// the picture and sound finished moving to the TV or back
     TvDone { to_tv: bool, res: Result<(), String> },
+    /// the combo for a clip (false) or a screenshot (true) was pressed
+    ClipKey(bool),
+    /// a clip or screenshot was written
+    ClipSaved(Result<crate::clips::Saved, String>),
+    Transfer(crate::transfer::Event),
 }
 
 /// Sends events to the UI and wakes it up.
@@ -107,6 +112,14 @@ pub(crate) fn load_get_state_ex() -> Option<GetStateEx> {
 const GUIDE: u16 = 0x0400;
 const BACK: u16 = 0x0020;
 const START: u16 = 0x0010;
+const L3: u16 = 0x0040;
+const R3: u16 = 0x0080;
+const RB: u16 = 0x0200;
+
+/// True on the press that completes the combo.
+fn chord(now: u16, before: u16, keys: u16) -> bool {
+    now & keys == keys && before & keys != keys
+}
 
 /// `own` is OTIUM's window handle, filled in once the window exists.
 pub fn start_guide(bus: Bus, own: Arc<AtomicIsize>) {
@@ -124,9 +137,15 @@ pub fn start_guide(bus: Bus, own: Arc<AtomicIsize>) {
                     }
                     let b = s.buttons;
                     let guide = b & GUIDE != 0 && *p & GUIDE == 0;
-                    let combo = b & (BACK | START) == BACK | START && *p & (BACK | START) != BACK | START;
+                    let combo = chord(b, *p, BACK | START);
                     if guide || combo {
                         summon(&bus, own.load(Ordering::Relaxed));
+                    }
+                    if chord(b, *p, L3 | R3) {
+                        bus.send(Event::ClipKey(true));
+                    }
+                    if chord(b, *p, BACK | RB) {
+                        bus.send(Event::ClipKey(false));
                     }
                     *p = b;
                 }
@@ -149,7 +168,8 @@ fn summon(bus: &Bus, own: isize) {
     }
 }
 
-/// Ctrl+Alt+Home from anywhere does what the Guide button does.
+/// Ctrl+Alt+Home from anywhere does what the Guide button does; Ctrl+Alt+C saves a clip and
+/// Ctrl+Alt+S takes a screenshot. A key another program holds just doesn't work: the others do.
 pub fn start_hotkey(bus: Bus, own: Arc<AtomicIsize>) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT};
     use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
@@ -157,14 +177,19 @@ pub fn start_hotkey(bus: Bus, own: Arc<AtomicIsize>) {
         .name("hotkey".into())
         .spawn(move || unsafe {
             // hotkeys registered without a window are posted to this thread's queue
-            if let Err(e) = RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x24) {
-                eprintln!("Ctrl+Alt+Home is taken: {e}");
-                return;
+            for (id, key, name) in [(1, 0x24, "Home"), (2, 0x43, "C"), (3, 0x53, "S")] {
+                if let Err(e) = RegisterHotKey(None, id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, key) {
+                    eprintln!("Ctrl+Alt+{name} is taken: {e}");
+                }
             }
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 if msg.message == WM_HOTKEY {
-                    summon(&bus, own.load(Ordering::Relaxed));
+                    match msg.wParam.0 {
+                        2 => bus.send(Event::ClipKey(false)),
+                        3 => bus.send(Event::ClipKey(true)),
+                        _ => summon(&bus, own.load(Ordering::Relaxed)),
+                    }
                 }
             }
         })

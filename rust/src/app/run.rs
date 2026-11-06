@@ -290,6 +290,9 @@ impl App {
             Event::VpnDone { wanted, res } => self.on_vpn_done(wanted, res),
             Event::Trailer { appid, path } => self.on_trailer(appid, path),
             Event::TvDone { to_tv, res } => self.on_tv_done(to_tv, res),
+            Event::ClipKey(shot) => self.on_clip_key(shot),
+            Event::ClipSaved(res) => self.on_clip_saved(res),
+            Event::Transfer(t) => self.on_transfer(t),
             Event::Show => self.show_window(),
             Event::GuideFront { prev } => {
                 self.show_window();

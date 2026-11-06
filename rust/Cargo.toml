@@ -1,6 +1,6 @@
 [package]
 name = "otium"
-version = "3.5.0"
+version = "3.6.0"
 edition = "2021"
 build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
@@ -35,6 +35,12 @@ windows = { version = "0.58", features = [
     "Win32_System_Power",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
     "Win32_System_LibraryLoader",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",

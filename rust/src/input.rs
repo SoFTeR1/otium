@@ -140,6 +140,8 @@ pub struct Input {
     cal: HashMap<String, PadCal>,
     /// the pad that was used last
     active: Option<GamepadId>,
+    /// combos pressed: a screenshot (true) or a clip (false)
+    clip_keys: Vec<bool>,
 }
 
 impl Input {
@@ -155,9 +157,15 @@ impl Input {
             focused: true,
             cal: HashMap::new(),
             active: None,
+            clip_keys: Vec::new(),
         };
         me.detect_pad();
         me
+    }
+
+    /// The clip and screenshot combos pressed since the last call.
+    pub fn take_clip_keys(&mut self) -> Vec<bool> {
+        std::mem::take(&mut self.clip_keys)
     }
 
     /// New `settings.padCal` (at start and after a calibration).
@@ -304,6 +312,15 @@ impl Input {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
                     active = Some(ev.id);
+                    // pads that XInput doesn't see (a DualSense without Steam or DS4Windows)
+                    let held = |o: Button| gilrs.connected_gamepad(ev.id).is_some_and(|p| p.is_pressed(o));
+                    match b {
+                        Button::LeftThumb if held(Button::RightThumb) => self.clip_keys.push(true),
+                        Button::RightThumb if held(Button::LeftThumb) => self.clip_keys.push(true),
+                        Button::RightTrigger if held(Button::Select) => self.clip_keys.push(false),
+                        Button::Select if held(Button::RightTrigger) => self.clip_keys.push(false),
+                        _ => {}
+                    }
                     if let Some(n) = button_nav(b).filter(|_| !self.test_mode && self.focused) {
                         out.push(n);
                     }

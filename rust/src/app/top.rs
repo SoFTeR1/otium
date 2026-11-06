@@ -290,7 +290,7 @@ impl App {
         while self.wheel.abs() >= step {
             let up = self.wheel > 0.0;
             self.wheel -= step.copysign(self.wheel);
-            let home_row = self.modal.is_none() && !self.social.open && self.pages.page == 0 && self.zone == Zone::Row;
+            let home_row = self.modal.is_none() && !self.social.open && !self.gallery.open && self.pages.page == 0 && self.zone == Zone::Row;
             navs.push(match (home_row, up) {
                 (true, true) => Nav::Left,
                 (true, false) => Nav::Right,
@@ -331,6 +331,7 @@ impl App {
             Some(Modal::Control { mixer: Some(_), .. }) => matches!(h, Hit::Mixer(_)),
             Some(Modal::Control { .. }) => matches!(h, Hit::Cc(_)),
             Some(_) => matches!(h, Hit::Row(_)),
+            None if self.gallery.open => matches!(h, Hit::Gallery(_)),
             None if self.social.open => matches!(h, Hit::Social(_)),
             None if self.launching.is_some() || self.reorder => false,
             None => matches!(h, Hit::Game(_) | Hit::Media(_) | Hit::Play | Hit::More | Hit::Top(_)) && self.pages.page == 0,
@@ -363,6 +364,7 @@ impl App {
                 }
             }
             Hit::Social(i) => self.social_hover(i),
+            Hit::Gallery(i) => self.gallery_hover(i),
         }
     }
 }
