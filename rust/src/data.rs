@@ -268,15 +268,6 @@ impl Game {
         self.extra.get("background").and_then(Value::as_str).filter(|s| !s.is_empty())
     }
 
-    /// The Store's id for this game, when it was installed from there.
-    pub fn store_id(&self) -> Option<&str> {
-        self.extra.get("storeId").and_then(Value::as_str)
-    }
-
-    pub fn set_store_id(&mut self, id: &str) {
-        self.extra.insert("storeId".into(), Value::from(id));
-    }
-
     pub fn set_background(&mut self, url: &str) {
         self.extra.insert("background".into(), Value::from(url));
     }

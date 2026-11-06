@@ -278,6 +278,9 @@ impl App {
                 i.raw_scroll_delta.y,
             )
         });
+        // moving to the TV puts the pointer in the middle of the new screen: that's no hovering,
+        // and it would land on "Отмена" of the question being asked
+        let moved = moved && !self.tv_asking();
         let mut navs = Vec::new();
         if back {
             navs.push(Nav::Back);

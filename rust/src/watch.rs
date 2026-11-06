@@ -50,11 +50,8 @@ pub enum Event {
     VpnDone { wanted: bool, res: Result<bool, String> },
     /// a Steam game's trailer is ready in the cache (None: it has none)
     Trailer { appid: String, path: Option<std::path::PathBuf> },
-    /// the Store: fresh catalog, a game's latest version, install progress and result
-    StoreCatalog(Vec<crate::store::Item>),
-    StoreLatest { id: String, version: String },
-    StoreProgress { id: String, stage: crate::store::Stage, pct: u8 },
-    StoreDone { id: String, res: Result<crate::store::Installed, String> },
+    /// the picture and sound finished moving to the TV or back
+    TvDone { to_tv: bool, res: Result<(), String> },
 }
 
 /// Sends events to the UI and wakes it up.

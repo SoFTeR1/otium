@@ -289,7 +289,7 @@ impl App {
             e @ (Event::ServiceWindow { .. } | Event::ServiceClosed { .. }) => self.on_service_event(e),
             Event::VpnDone { wanted, res } => self.on_vpn_done(wanted, res),
             Event::Trailer { appid, path } => self.on_trailer(appid, path),
-            e @ (Event::StoreCatalog(_) | Event::StoreLatest { .. } | Event::StoreProgress { .. } | Event::StoreDone { .. }) => self.on_store_event(e),
+            Event::TvDone { to_tv, res } => self.on_tv_done(to_tv, res),
             Event::Show => self.show_window(),
             Event::GuideFront { prev } => {
                 self.show_window();

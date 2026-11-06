@@ -47,10 +47,6 @@ pub enum SetMenu {
     /// "Кинопоиск не работает через VPN": what to do
     Vpn,
     Backgrounds,
-    /// an installed Store game
-    Store,
-    /// choosing where a Store game goes
-    Folder,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,14 +59,8 @@ pub enum SetKey {
     Layout,
     Sounds,
     PadApps,
-    FolderRow,
-    StoreVia,
-    StoreInstall,
-    StorePlay,
-    StoreUpdate,
-    StoreFolder,
-    StoreRemove,
-    StoreRemoved,
+    TvDisplay,
+    TvKeep,
     Backgrounds,
     BgMode,
     BgTrailers,

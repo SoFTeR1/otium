@@ -1,6 +1,6 @@
 [package]
 name = "otium"
-version = "3.4.1"
+version = "3.5.0"
 edition = "2021"
 build = "build.rs"
 description = "OTIUM — игровой лаунчер для Windows в стиле консоли"
@@ -24,6 +24,9 @@ uuid = { version = "1", features = ["v4"] }
 raw-window-handle = "0.6"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
+    "Win32_Devices_Display",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
@@ -50,8 +53,6 @@ windows = { version = "0.58", features = [
     "Storage_Streams",
 ] }
 ureq = { version = "2", features = ["json"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
-sha2 = "0.10"
 tungstenite = "0.28"
 regex = "1"
 rodio = { version = "0.19", default-features = false, features = ["vorbis", "symphonia-mp3"] }

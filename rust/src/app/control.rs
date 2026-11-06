@@ -38,6 +38,7 @@ pub enum CtlAction {
     Minimize,
     Power,
     Vpn,
+    Tv,
 }
 
 enum Pic {
@@ -229,6 +230,7 @@ impl App {
     pub(super) fn open_control(&mut self) {
         let _ = self.media_tx.send(MediaCmd::Poll);
         self.vpn_refresh();
+        self.tv_refresh();
         self.open(Modal::Control { focus: 0, scroll: 0.0, mixer: None });
     }
 
@@ -313,6 +315,9 @@ impl App {
         let unread = self.social_unread();
         let friends = if unread > 0 { format!("Друзья · {unread}") } else { "Друзья".into() };
         t.push(tile(CtlAction::Social, ic::CHAT, &friends, "Друзья и сообщения"));
+        if let Some((label, hint)) = self.tv_tile() {
+            t.push(tile(CtlAction::Tv, ic::TV, label, &hint));
+        }
         if self.vpn.exe.is_some() {
             let (label, hint) = match (self.vpn.busy, self.vpn.on) {
                 (true, _) => ("VPN…", "Переключаю VPN"),
@@ -456,6 +461,7 @@ impl App {
                 self.pending_cmd.push(egui::ViewportCommand::Minimized(true));
             }
             CtlAction::Power => self.open_settings(SetMenu::Power, 0),
+            CtlAction::Tv => self.tv_toggle(),
             CtlAction::Vpn => {
                 // a switch from here never opens a service that was waiting for an answer
                 self.vpn_cancel_pending();

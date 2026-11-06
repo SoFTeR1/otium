@@ -23,7 +23,6 @@ pub enum Target {
     GameArgs,
     Timer,
     Search,
-    NewFolder,
 }
 
 impl Target {

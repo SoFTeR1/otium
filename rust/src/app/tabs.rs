@@ -1,11 +1,9 @@
-//! The Media and Store tabs of the top bar. Media: streaming services, each opened as its own
-//! fullscreen browser window. Store: a test catalog of ports and free games (nothing installs yet).
+//! The Media tab of the top bar: streaming services, each opened as its own fullscreen browser window.
 
 use super::{ease_out, App, Zone};
 use crate::draw::{self, bold, font, semibold, white};
 use crate::input::Nav;
 use crate::services::{self, SERVICES};
-use crate::store::Stage;
 use crate::watch::Event;
 use egui::{pos2, vec2, Align2, Color32, CornerRadius, Rect, Stroke, StrokeKind};
 use std::time::{Duration, Instant};
@@ -15,16 +13,14 @@ pub enum Tab {
     #[default]
     Games,
     Media,
-    Store,
 }
 
-pub const TABS: [(Tab, &str); 3] = [(Tab::Games, "Игры"), (Tab::Media, "Медиа"), (Tab::Store, "Магазин")];
+pub const TABS: [(Tab, &str); 2] = [(Tab::Games, "Игры"), (Tab::Media, "Медиа")];
 
 #[derive(Default)]
 pub struct Tabs {
     pub tab: Tab,
     media_sel: usize,
-    store_sel: usize,
     scroll: f32,
     /// animated selection (tile sizes follow it)
     focus: f32,
@@ -60,9 +56,6 @@ impl App {
             self.tabs.prev_color = self.tab_color();
             self.tabs.changed = Some(Instant::now());
             self.tabs.tab = t;
-            if t == Tab::Store {
-                self.shop_opened();
-            }
             self.tabs.scroll = 0.0;
             self.tabs.focus = self.tab_sel() as f32;
         }
@@ -72,7 +65,6 @@ impl App {
     fn tab_sel(&self) -> usize {
         match self.tabs.tab {
             Tab::Media => self.tabs.media_sel,
-            Tab::Store => self.tabs.store_sel,
             Tab::Games => self.sel,
         }
     }
@@ -86,7 +78,6 @@ impl App {
         self.tabs.changed = Some(Instant::now());
         match self.tabs.tab {
             Tab::Media => self.tabs.media_sel = i,
-            Tab::Store => self.tabs.store_sel = i,
             Tab::Games => {}
         }
     }
@@ -104,25 +95,6 @@ impl App {
                     color: rgb(s.color),
                 })
                 .collect(),
-            Tab::Store => self
-                .shop
-                .items
-                .iter()
-                .map(|i| Entry {
-                    name: i.name.clone(),
-                    kicker: i.kind.clone(),
-                    about: i.about.clone(),
-                    note: Some(match (&i.via, self.store_version(&self.store_target(i).id), self.store_update(i), &i.needs) {
-                        (Some(_), Some(_), _, _) => format!("Лаунчер {} установлен", self.store_target(i).name),
-                        (Some(_), None, _, n) => format!("Нужен лаунчер {} · {}", self.store_target(i).name, n.as_deref().unwrap_or("своя копия игры").to_lowercase()),
-                        (None, Some(_), Some(new), _) => format!("Установлена · есть версия {new}"),
-                        (None, Some(v), None, _) => format!("Установлена · версия {v}"),
-                        (None, None, _, Some(n)) => format!("Нужно: {n}"),
-                        (None, None, _, None) => "Ничего больше не нужно — бесплатно и с открытым кодом".to_string(),
-                    }),
-                    color: rgb(i.color),
-                })
-                .collect(),
         }
     }
 
@@ -136,7 +108,7 @@ impl App {
 
     // ---------- input ----------
 
-    /// The Media / Store tab has the screen (not the top bar).
+    /// The Media tab has the screen (not the top bar).
     pub(super) fn tab_nav(&mut self, nav: Nav) {
         let n = self.tab_entries().len();
         let sel = self.tab_sel();
@@ -146,13 +118,7 @@ impl App {
             (Zone::Row, Nav::Right) if sel + 1 < n => self.set_tab_sel(sel + 1),
             (Zone::Row, Nav::Down) => self.zone = Zone::Play,
             (Zone::Row | Zone::Play, Nav::Ok) => self.tab_activate(),
-            (_, Nav::Options) if self.tabs.tab == Tab::Store => self.shop_menu(sel),
             (Zone::Play, Nav::Up | Nav::Back) => self.zone = Zone::Row,
-            // the Store's installed games have a menu next to the button
-            (Zone::Play, Nav::Right) if self.tab_has_menu() => self.zone = Zone::More,
-            (Zone::More, Nav::Left) => self.zone = Zone::Play,
-            (Zone::More, Nav::Up | Nav::Back) => self.zone = Zone::Row,
-            (Zone::More, Nav::Ok) => self.shop_menu(sel),
             // B on the row goes back to the games
             (Zone::Row, Nav::Back) => self.set_tab(Tab::Games),
             _ => {}
@@ -166,10 +132,6 @@ impl App {
         self.zone = Zone::Top(i);
     }
 
-    fn tab_has_menu(&self) -> bool {
-        self.tabs.tab == Tab::Store && self.shop.items.get(self.tabs.store_sel).is_some_and(|i| self.store_version(&self.store_target(i).id).is_some())
-    }
-
     pub(super) fn tab_hover(&mut self, i: usize) {
         self.set_tab_sel(i);
         self.zone = Zone::Row;
@@ -178,7 +140,6 @@ impl App {
     fn tab_activate(&mut self) {
         match self.tabs.tab {
             Tab::Media => self.open_service(self.tabs.media_sel),
-            Tab::Store => self.shop_activate(self.tabs.store_sel),
             Tab::Games => {}
         }
     }
@@ -301,19 +262,7 @@ impl App {
     }
 
     pub(super) fn tab_hints(&self) -> Vec<(usize, &'static str)> {
-        match self.tabs.tab {
-            Tab::Store => {
-                let item = self.shop.items.get(self.tabs.store_sel);
-                if self.tab_has_menu() {
-                    vec![(0, "Запустить"), (2, "Параметры"), (1, "Назад")]
-                } else if item.is_some_and(|i| i.via.is_some()) {
-                    vec![(0, "Загрузить лаунчер"), (1, "Назад")]
-                } else {
-                    vec![(0, "Установить"), (1, "Назад")]
-                }
-            }
-            _ => vec![(0, "Открыть"), (1, "Назад")],
-        }
+        vec![(0, "Открыть"), (1, "Назад")]
     }
 
     // ---------- painting ----------
@@ -384,45 +333,12 @@ impl App {
             draw::glow(p, btn, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
         }
         p.rect_filled(btn, CornerRadius::same((34.0 * s) as u8), if focus { Color32::WHITE } else { white(0.88) });
-        let store_item = (self.tabs.tab == Tab::Store).then(|| self.shop.items.get(sel)).flatten();
-        let store_target = store_item.map(|i| self.store_target(i));
-        let progress = store_target.as_ref().and_then(|t| self.shop.busy.as_ref().filter(|b| b.0 == t.id));
-        if let Some((_, _, pct)) = progress {
-            let done = Rect::from_min_size(btn.min, vec2(btn.width() * *pct as f32 / 100.0, btn.height()));
-            p.rect_filled(done, CornerRadius::same((34.0 * s) as u8), Color32::from_rgb(120, 170, 255));
-        }
-        let progress_label = progress.map(|(_, stage, pct)| match stage {
-            Stage::Download => format!("Скачиваем {pct}%"),
-            Stage::Unpack => format!("Распаковка {pct}%"),
-        });
         let label: &str = match self.tabs.tab {
-            Tab::Store => match (&progress_label, store_target.as_ref().is_some_and(|t| self.store_version(&t.id).is_some())) {
-                (Some(l), _) => l,
-                (None, true) => "Запустить",
-                (None, false) if store_item.is_some_and(|i| i.via.is_some()) => "Загрузить лаунчер",
-                (None, false) => "Установить",
-            },
             _ if self.tabs.opening.is_some_and(|(id, t)| SERVICES.get(sel).is_some_and(|s| s.id == id) && t.elapsed() < Duration::from_secs(10)) => "Открываем…",
             _ => "Открыть",
         };
         p.text(btn.center(), Align2::CENTER_CENTER, label, semibold(26.0 * s), Color32::from_rgb(10, 12, 18));
         crate::mouse::add(btn, crate::mouse::Hit::Play);
-        if self.tab_has_menu() {
-            let more = Rect::from_center_size(pos2(btn.right() + 58.0 * s, btn.center().y), vec2(68.0 * s, 68.0 * s));
-            crate::mouse::add(more, crate::mouse::Hit::More);
-            let f = self.zone == Zone::More && self.modal.is_none() && !self.social.open;
-            if f {
-                draw::glow(p, more, 34.0 * s, Color32::WHITE, 18.0 * s, 0.6);
-            }
-            p.circle_filled(more.center(), 34.0 * s, if f { white(0.95) } else { Color32::from_black_alpha(115) });
-            p.circle_stroke(more.center(), 34.0 * s, Stroke::new(1.5_f32, white(0.5)));
-            for dx in [-12.0, 0.0, 12.0] {
-                p.circle_filled(more.center() + vec2(dx * s, 0.0), 3.5 * s, if f { Color32::BLACK } else { Color32::WHITE });
-            }
-        } else if self.zone == Zone::More {
-            self.zone = Zone::Play;
-        }
-
         let mut y = btn.bottom() + 26.0 * s;
         if let Some(n) = &e.note {
             p.text(pos2(left + 4.0 * s, y), Align2::LEFT_TOP, n, font(20.0 * s), white(0.7 * appear));

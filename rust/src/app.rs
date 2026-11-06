@@ -18,6 +18,7 @@ mod bg;
 mod calls;
 mod control;
 mod top;
+mod tvui;
 mod profile;
 pub use control::MixerPanel;
 mod edit;
@@ -25,7 +26,6 @@ mod pages;
 mod run;
 pub use calls::PickFor;
 mod settings;
-mod shop;
 mod tabs;
 mod vpnui;
 pub(crate) use tabs::Tab;
@@ -140,13 +140,13 @@ pub struct App {
     edit_id: Option<String>,
     /// "Переставить": Left / Right move the selected tile
     reorder: bool,
-    /// the Media and Store tabs
+    /// the Media tab
     tabs: tabs::Tabs,
     /// the pad as mouse and keys inside the Media service windows
     padmouse: Arc<crate::padmouse::Shared>,
     vpn: vpnui::Vpn,
     bg: bg::Bg,
-    shop: shop::Shop,
+    tv: tvui::Tv,
 }
 
 impl App {
@@ -240,7 +240,7 @@ impl App {
             padmouse: Default::default(),
             vpn: vpnui::Vpn::new(),
             bg: Default::default(),
-            shop: Default::default(),
+            tv: Default::default(),
             lib,
         };
         app.input.set_cal(app.lib.settings.get("padCal"));
@@ -363,10 +363,6 @@ impl App {
         // left and right change a volume row in place
         if matches!(nav, Nav::Left | Nav::Right) && self.volume_nav(nav) {
             return;
-        }
-        // B in the folder chooser goes one level up
-        if nav == Nav::Back && matches!(self.modal, Some(Modal::Settings { menu: crate::modal::SetMenu::Folder, .. })) {
-            return self.folder_up();
         }
         if let Some(m) = self.modal.as_mut() {
             let action = m.handle(nav);
@@ -696,6 +692,7 @@ impl eframe::App for App {
         }
         self.tick(ctx);
         self.tick_timer();
+        self.tick_tv();
         self.tick_updates();
         if self.forget_at.elapsed() > Duration::from_secs(5) && std::env::var("OTIUM_MEM_EXP").ok().as_deref() != Some("tour-keep") {
             self.forget_at = Instant::now();

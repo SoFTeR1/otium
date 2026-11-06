@@ -19,7 +19,7 @@ pub enum Hit {
     Cc(usize),
     /// a row of the volume mixer
     Mixer(usize),
-    /// a tile of the Media or Store tab
+    /// a tile of the Media tab
     Media(usize),
     /// an entry of the friends list
     Social(usize),
