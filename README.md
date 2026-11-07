@@ -6,3 +6,5 @@
 ### 👉 [github.com/SoFTeR1/otium-release](https://github.com/SoFTeR1/otium-release)
 
 Этот репозиторий служит только для выпуска обновлений: установленный OTIUM проверяет новые версии здесь.
+
+© SoFTeR1. Все права защищены.
